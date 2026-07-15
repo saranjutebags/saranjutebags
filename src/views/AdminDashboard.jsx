@@ -102,8 +102,7 @@ const AdminDashboard = () => {
     active: true,
   });
 
-  // Banners
-  const [banners, setBanners] = useState([]);
+  // Banners — use AdminContext (no local state needed)
   const [editingBanner, setEditingBanner] = useState(null);
   const [bannerForm, setBannerForm] = useState({
     title: '',
@@ -162,18 +161,12 @@ const AdminDashboard = () => {
     setTimeout(() => setMessage(''), 3000);
   };
 
-  // Load data from Firestore
+  // Load data from Firestore (banners come from AdminContext, not a local listener)
   useEffect(() => {
     const unsubPopups = onSnapshot(collection(db, 'popups'), (snap) => {
       const docs = [];
       snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
       setPopups(docs);
-    });
-
-    const unsubBanners = onSnapshot(collection(db, 'banners'), (snap) => {
-      const docs = [];
-      snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
-      setBanners(docs);
     });
 
     const unsubCoupons = onSnapshot(collection(db, 'coupons'), (snap) => {
@@ -184,7 +177,6 @@ const AdminDashboard = () => {
 
     return () => {
       unsubPopups();
-      unsubBanners();
       unsubCoupons();
     };
   }, []);
@@ -421,27 +413,20 @@ const AdminDashboard = () => {
   };
 
   // Banner handlers
-  const handleSaveBanner = async () => {
+  const handleSaveBanner = () => {
+    if (!bannerForm.title.trim()) { showMessage('Banner title is required', 'error'); return; }
+    if (!bannerForm.image) { showMessage('Please upload or enter an image URL', 'error'); return; }
     setLoading(true);
     try {
-      const id = editingBanner?.id || `banner-${Date.now()}`;
-      const bannerData = { 
-        ...bannerForm, 
-        id,
-        createdAt: new Date().toISOString(),
-      };
-      
-      await setDoc(doc(db, 'banners', id), bannerData, { merge: true });
-      showMessage(editingBanner ? 'Banner updated successfully' : 'Banner added successfully');
-      
+      if (editingBanner) {
+        updateBanner(editingBanner.id, { ...bannerForm });
+        showMessage('Banner updated successfully');
+      } else {
+        addBanner({ ...bannerForm });
+        showMessage('Banner added successfully');
+      }
       setEditingBanner(null);
-      setBannerForm({
-        title: '',
-        image: '',
-        type: 'Desktop',
-        animation: 'Fade',
-        active: true,
-      });
+      setBannerForm({ title: '', image: '', type: 'Desktop', animation: 'Fade', active: true });
     } catch (error) {
       console.error('Banner save error:', error);
       showMessage('Failed to save banner', 'error');
@@ -450,10 +435,10 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleDeleteBanner = async (id) => {
+  const handleDeleteBanner = (id) => {
     if (!confirm('Delete this banner?')) return;
     try {
-      await deleteDoc(doc(db, 'banners', id));
+      deleteBanner(id);
       showMessage('Banner deleted successfully');
     } catch (error) {
       showMessage('Failed to delete banner', 'error');
@@ -1729,38 +1714,68 @@ const AdminDashboard = () => {
       <Card title={editingBanner ? 'Edit Banner' : 'Add New Banner'}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Input
-            label="Title"
+            label="Banner Title *"
             value={bannerForm.title}
             onChange={(e) => setBannerForm({ ...bannerForm, title: e.target.value })}
+            placeholder="e.g. Summer Sale"
           />
-          <select
-            value={bannerForm.type}
-            onChange={(e) => setBannerForm({ ...bannerForm, type: e.target.value })}
-            className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="Desktop">Desktop</option>
-            <option value="Mobile">Mobile</option>
-          </select>
-          <select
-            value={bannerForm.animation}
-            onChange={(e) => setBannerForm({ ...bannerForm, animation: e.target.value })}
-            className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="Fade">Fade</option>
-            <option value="Slide">Slide</option>
-            <option value="Zoom">Zoom</option>
-          </select>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Display On *</label>
+            <select
+              value={bannerForm.type}
+              onChange={(e) => setBannerForm({ ...bannerForm, type: e.target.value })}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="Desktop">Desktop only</option>
+              <option value="Mobile">Mobile only</option>
+              <option value="Both">Desktop &amp; Mobile</option>
+            </select>
+            <p className="text-xs text-gray-400">Choose where this banner appears</p>
+          </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Slide Animation</label>
+            <select
+              value={bannerForm.animation}
+              onChange={(e) => setBannerForm({ ...bannerForm, animation: e.target.value })}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="Fade">Fade</option>
+              <option value="Slide">Slide</option>
+              <option value="Zoom">Zoom</option>
+            </select>
+          </div>
+          <div className="flex items-end pb-1">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={bannerForm.active}
+                onChange={(e) => setBannerForm({ ...bannerForm, active: e.target.checked })}
+                className="w-4 h-4"
+              />
+              <span className="text-sm font-medium text-gray-700">Active (visible on site)</span>
+            </label>
+          </div>
         </div>
-        <div className="mt-4 space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Image</label>
-          <textarea
-            value={bannerForm.image}
-            onChange={(e) => setBannerForm({ ...bannerForm, image: e.target.value })}
-            placeholder="Image URL"
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            rows={2}
-          />
-          <div className="flex items-center gap-2">
+
+        {/* Image upload */}
+        <div className="mt-4 space-y-3">
+          <label className="block text-sm font-medium text-gray-700">Banner Image *</label>
+          {bannerForm.image && (
+            <div className="relative inline-block">
+              <img
+                src={bannerForm.image}
+                alt="Preview"
+                className="w-full max-w-xs h-32 object-cover rounded-xl border border-gray-200"
+              />
+              <button
+                onClick={() => setBannerForm({ ...bannerForm, image: '' })}
+                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
             <input
               type="file"
               accept="image/*"
@@ -1774,27 +1789,32 @@ const AdminDashboard = () => {
               className="hidden"
               id="bannerImageUpload"
             />
-            <label htmlFor="bannerImageUpload" className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer">
+            <label
+              htmlFor="bannerImageUpload"
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg cursor-pointer hover:bg-emerald-700 text-sm"
+            >
               <Upload className="w-4 h-4" />
               Upload Image
             </label>
+            <span className="text-xs text-gray-400">or paste URL below</span>
           </div>
+          <input
+            type="text"
+            value={bannerForm.image}
+            onChange={(e) => setBannerForm({ ...bannerForm, image: e.target.value })}
+            placeholder="https://... image URL (optional if uploaded)"
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+          />
+          <p className="text-xs text-amber-600">
+            Recommended: Desktop banners — 1200×400px landscape. Mobile banners — 600×800px portrait.
+          </p>
         </div>
-        <div className="mt-4 flex gap-3">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={bannerForm.active}
-              onChange={(e) => setBannerForm({ ...bannerForm, active: e.target.checked })}
-            />
-            Active
-          </label>
-        </div>
-        <div className="mt-4 flex gap-3">
+
+        <div className="mt-5 flex gap-3">
           <button
             onClick={handleSaveBanner}
             disabled={loading}
-            className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
           >
             <Save className="w-4 h-4" />
             {loading ? 'Saving...' : editingBanner ? 'Update Banner' : 'Add Banner'}
@@ -1814,32 +1834,49 @@ const AdminDashboard = () => {
         </div>
       </Card>
 
-      <Card title="Banner List">
-        <div className="space-y-3">
-          {banners.map(banner => (
-            <div key={banner.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-              <div className="flex items-center gap-4">
-                {banner.image && <img src={banner.image} alt={banner.title} className="w-32 h-20 object-cover rounded" />}
-                <div>
-                  <p className="font-medium">{banner.title}</p>
-                  <p className="text-sm text-gray-500">{banner.type} • {banner.animation}</p>
-                  <span className={`px-2 py-1 rounded text-xs ${banner.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
-                    {banner.active ? 'Active' : 'Inactive'}
-                  </span>
+      <Card title={`Banner List (${banners.length})`}>
+        {banners.length === 0 ? (
+          <p className="text-gray-500 text-center py-8">No banners yet — add one above</p>
+        ) : (
+          <div className="space-y-3">
+            {banners.map(banner => (
+              <div key={banner.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-100">
+                <div className="flex items-center gap-4">
+                  {banner.image && (
+                    <img src={banner.image} alt={banner.title} className="w-28 h-16 object-cover rounded-lg border border-gray-200 shrink-0" />
+                  )}
+                  <div>
+                    <p className="font-semibold text-gray-800">{banner.title}</p>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold mr-2 ${
+                        banner.type === 'Mobile' ? 'bg-purple-100 text-purple-700' :
+                        banner.type === 'Both' ? 'bg-blue-100 text-blue-700' :
+                        'bg-emerald-100 text-emerald-700'
+                      }`}>
+                        {banner.type === 'Both' ? 'Desktop & Mobile' : banner.type}
+                      </span>
+                      {banner.animation}
+                    </p>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${banner.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                      {banner.active ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={() => { setEditingBanner(banner); setBannerForm({ title: banner.title, image: banner.image || '', type: banner.type || 'Desktop', animation: banner.animation || 'Fade', active: banner.active !== false }); }}
+                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
+                  >
+                    <Edit className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => handleDeleteBanner(banner.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button onClick={() => { setEditingBanner(banner); setBannerForm(banner); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded">
-                  <Edit className="w-4 h-4" />
-                </button>
-                <button onClick={() => handleDeleteBanner(banner.id)} className="p-2 text-red-600 hover:bg-red-50 rounded">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          ))}
-          {banners.length === 0 && <p className="text-gray-500 text-center py-8">No banners yet</p>}
-        </div>
+            ))}
+          </div>
+        )}
       </Card>
     </div>
   );

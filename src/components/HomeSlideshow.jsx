@@ -27,6 +27,8 @@ const HomeSlideshow = ({ className = '', height = 'h-full' }) => {
     if (!b.active || !b.image) return false;
     // If type is not set, show on all
     if (!b.type) return true;
+    // "Both" shows on every screen
+    if (b.type === 'Both') return true;
     // Show Desktop banners on desktop, Mobile banners on mobile
     if (isMobile) {
       return b.type === 'Mobile' || b.type === 'Mobile Banner';
