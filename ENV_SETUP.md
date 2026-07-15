@@ -21,8 +21,8 @@ VITE_ONESIGNAL_API_KEY=your_onesignal_api_key
 ## EmailJS Configuration (REQUIRED for order status emails)
 ```
 VITE_EMAILJS_PUBLIC_KEY=your_emailjs_public_key
-VITE_EMAILJS_SERVICE_ID=service_heco3g8
-VITE_EMAILJS_TEMPLATE_ID=template_v2scuzk
+VITE_EMAILJS_SERVICE_ID=ervsice_xxxxxxxx
+VITE_EMAILJS_TEMPLATE_ID=template_xxxxxxxx
 ```
 
 ## Getting the Values
@@ -45,15 +45,12 @@ VITE_EMAILJS_TEMPLATE_ID=template_v2scuzk
 2. Create an account or sign in
 3. Go to Account → General → Copy your Public Key
 4. The Service ID and Template ID are pre-configured in the code:
-   - Service ID: `service_heco3g8`
-   - Template ID: `template_v2scuzk`
+   - Service ID: `service_xxxxxxxx`
+   - Template ID: `template_xxxxx`
 5. Add your Public Key to the `.env` file
 
-## Admin Email
-The admin email is configured in `src/contexts/AuthContext.jsx`:
-- Default admin emails: `admin@gmail.com`, `saranjutebags@gmail.com`, `saranutebags@gmail.com`
 
-To add more admins, edit the `isEmailAdmin` function in `AuthContext.jsx`.
+
 
 ## Troubleshooting
 - If the page is empty: Firebase environment variables are missing
