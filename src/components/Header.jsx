@@ -55,25 +55,25 @@ const Header = () => {
       animate={{ y: 0 }}
       className="fixed top-0 left-0 right-0 z-40 glass shadow-lg"
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-20">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
+        <div className="flex items-center justify-between h-16 sm:h-20">
           {/* Logo */}
-          <Link to="/" className="flex items-center space-x-3 hover:scale-105 transition-transform">
-            <div className="relative">
+          <Link to="/" className="flex items-center space-x-2 hover:scale-105 transition-transform min-w-0 shrink-0">
+            <div className="relative shrink-0">
               <img 
                 src={companySettings?.logo || '/logo.webp'} 
                 alt={companySettings?.companyName || 'Saran Jute Bags'} 
-                className="h-12 w-12 object-contain"
+                className="h-9 w-9 sm:h-12 sm:w-12 object-contain"
                 onError={(e) => {
                   e.target.style.display = 'none';
                   e.target.nextElementSibling.style.display = 'flex';
                 }}
               />
-              <div className="h-12 w-12 hidden items-center justify-center bg-gradient-to-br from-emerald-500 to-forest-500 rounded-xl text-white font-bold">
+              <div className="h-9 w-9 sm:h-12 sm:w-12 hidden items-center justify-center bg-gradient-to-br from-emerald-500 to-forest-500 rounded-xl text-white font-bold text-xs">
                 SJB
               </div>
             </div>
-            <span className="text-xl font-bold text-gradient hidden sm:block">
+            <span className="text-sm sm:text-base lg:text-xl font-bold text-gradient truncate max-w-[110px] sm:max-w-[180px] lg:max-w-none">
               {companySettings?.companyName || 'Saran Jute Bags'}
             </span>
           </Link>
@@ -92,25 +92,25 @@ const Header = () => {
           </nav>
 
           {/* Right Actions */}
-          <div className="flex items-center space-x-2">
-            <button className="p-2 hover:bg-emerald-50 rounded-full transition-colors">
-              <Search className="w-5 h-5 text-gray-700" />
+          <div className="flex items-center space-x-1 sm:space-x-2 shrink-0">
+            <button className="p-1.5 sm:p-2 hover:bg-emerald-50 rounded-full transition-colors">
+              <Search className="w-4 h-4 sm:w-5 sm:h-5 text-gray-700" />
             </button>
 
             <button 
               onClick={() => navigate('/wishlist')}
-              className="p-2 hover:bg-emerald-50 rounded-full transition-colors relative"
+              className="p-1.5 sm:p-2 hover:bg-emerald-50 rounded-full transition-colors relative"
             >
-              <Heart className="w-5 h-5 text-gray-700" />
+              <Heart className="w-4 h-4 sm:w-5 sm:h-5 text-gray-700" />
             </button>
 
             <button 
               onClick={() => navigate('/cart')}
-              className="p-2 hover:bg-emerald-50 rounded-full transition-colors relative"
+              className="p-1.5 sm:p-2 hover:bg-emerald-50 rounded-full transition-colors relative"
             >
-              <ShoppingBag className="w-5 h-5 text-gray-700" />
+              <ShoppingBag className="w-4 h-4 sm:w-5 sm:h-5 text-gray-700" />
               {cartCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-gradient-to-r from-emerald-500 to-green-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center font-bold shadow-lg">
+                <span className="absolute -top-1 -right-1 bg-gradient-to-r from-emerald-500 to-green-500 text-white text-[10px] w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center font-bold shadow-lg">
                   {cartCount}
                 </span>
               )}
@@ -120,9 +120,9 @@ const Header = () => {
               <div className="relative">
                 <button
                   onClick={() => setIsProfileOpen(!isProfileOpen)}
-                  className="flex items-center space-x-2 px-3 py-2 hover:bg-emerald-50 rounded-lg transition-colors"
+                  className="flex items-center space-x-1 sm:space-x-2 px-1.5 sm:px-3 py-1.5 sm:py-2 hover:bg-emerald-50 rounded-lg transition-colors"
                 >
-                  <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-forest-500 rounded-full flex items-center justify-center text-white font-semibold shadow-md">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-emerald-500 to-forest-500 rounded-full flex items-center justify-center text-white font-semibold shadow-md text-sm shrink-0">
                     {(user.displayName || user.email)?.[0]?.toUpperCase()}
                   </div>
                   <div className="hidden md:block text-left">
@@ -200,7 +200,7 @@ const Header = () => {
             ) : (
               <button
                 onClick={() => navigate('/auth')}
-                className="btn-primary text-sm px-5 py-2.5 flex items-center space-x-2"
+                className="btn-primary text-xs sm:text-sm px-3 sm:px-5 py-2 sm:py-2.5 flex items-center space-x-1.5"
               >
                 <User className="w-4 h-4" />
                 <span className="hidden sm:inline">Login</span>
@@ -210,9 +210,9 @@ const Header = () => {
             {/* Mobile Menu Button */}
             <button
               onClick={() => setIsOpen(!isOpen)}
-              className="md:hidden p-2 hover:bg-emerald-50 rounded-full transition-colors"
+              className="md:hidden p-1.5 sm:p-2 hover:bg-emerald-50 rounded-full transition-colors"
             >
-              {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+              {isOpen ? <X className="w-5 h-5 sm:w-6 sm:h-6" /> : <Menu className="w-5 h-5 sm:w-6 sm:h-6" />}
             </button>
           </div>
         </div>

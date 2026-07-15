@@ -38,14 +38,17 @@ import {
   CheckCircle,
   Truck,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  Tags,
+  ToggleLeft,
+  ToggleRight,
 } from 'lucide-react';
 
 const AdminDashboard = () => {
   const { user, signOut } = useAuth();
-  const { products, addProduct, updateProduct, deleteProduct } = useProducts();
+  const { products, categories, addProduct, updateProduct, deleteProduct, addCategory, updateCategory, deleteCategory, toggleCategoryVisibility } = useProducts();
   const { orders, updateOrder } = useCart();
-  const { companySettings, updateCompanySettings } = useAdmin();
+  const { companySettings, updateCompanySettings, banners, addBanner, updateBanner, deleteBanner } = useAdmin();
   const navigate = useNavigate();
   
   const [activeTab, setActiveTab] = useState('overview');
@@ -54,6 +57,9 @@ const AdminDashboard = () => {
   const [activeCategoryFilter, setActiveCategoryFilter] = useState('all');
   const [customDateFrom, setCustomDateFrom] = useState('');
   const [customDateTo, setCustomDateTo] = useState('');
+  const [analyticsFilter, setAnalyticsFilter] = useState('this-month');
+  const [analyticsFrom, setAnalyticsFrom] = useState('');
+  const [analyticsTo, setAnalyticsTo] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [editingProduct, setEditingProduct] = useState(null);
@@ -131,9 +137,16 @@ const AdminDashboard = () => {
     surface: companySettings?.surfaceColor || '#ecfdf5',
   });
 
+  // Category form state
+  const emptyCategoryForm = { name: '', image: '', description: '', sortOrder: '', visible: true, featured: false };
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [categoryForm, setCategoryForm] = useState(emptyCategoryForm);
+  const [categoryImageUploading, setCategoryImageUploading] = useState(false);
+
   const tabs = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'analytics', label: 'Analytics', icon: Package },
+    { id: 'categories', label: 'Categories', icon: Tags },
     { id: 'products', label: 'Products', icon: Package },
     { id: 'orders', label: 'Orders', icon: ShoppingCart },
     { id: 'customers', label: 'Customers', icon: Users },
@@ -661,7 +674,7 @@ const AdminDashboard = () => {
     return counts;
   };
 
-  const filterOrdersByDate = (ordersList, filter) => {
+  const filterOrdersByDate = (ordersList, filter, customFrom, customTo) => {
     const now = new Date();
     return ordersList.filter(order => {
       let orderDate;
@@ -679,14 +692,23 @@ const AdminDashboard = () => {
       switch (filter) {
         case 'today':
           return orderDate.toDateString() === now.toDateString();
-        case 'this-week':
+        case 'this-week': {
           const weekAgo = new Date(now);
           weekAgo.setDate(now.getDate() - 7);
           return orderDate >= weekAgo;
+        }
         case 'this-month':
           return orderDate.getMonth() === now.getMonth() && orderDate.getFullYear() === now.getFullYear();
         case 'this-year':
           return orderDate.getFullYear() === now.getFullYear();
+        case 'custom': {
+          const from = customFrom ? new Date(customFrom) : null;
+          const to = customTo ? new Date(customTo + 'T23:59:59') : null;
+          if (from && to) return orderDate >= from && orderDate <= to;
+          if (from) return orderDate >= from;
+          if (to) return orderDate <= to;
+          return true;
+        }
         default:
           return true;
       }
@@ -700,7 +722,7 @@ const AdminDashboard = () => {
         order.status?.toLowerCase() === activeOrderFilter.toLowerCase()
       );
     }
-    filtered = filterOrdersByDate(filtered, activeDateFilter);
+    filtered = filterOrdersByDate(filtered, activeDateFilter, customDateFrom, customDateTo);
     return filtered;
   };
 
@@ -837,12 +859,22 @@ const AdminDashboard = () => {
             onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })}
             placeholder="Enter stock quantity"
           />
-          <Input
-            label="Category"
-            value={productForm.category}
-            onChange={(e) => setProductForm({ ...productForm, category: e.target.value })}
-            placeholder="Enter category"
-          />
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Category</label>
+            <select
+              value={productForm.category}
+              onChange={(e) => setProductForm({ ...productForm, category: e.target.value })}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">— Select a category —</option>
+              {categories.filter(c => c.visible !== false).map(cat => (
+                <option key={cat.id} value={cat.name}>{cat.name}</option>
+              ))}
+            </select>
+            {categories.length === 0 && (
+              <p className="text-xs text-amber-600 mt-1">No categories yet. Add categories first from the Categories tab.</p>
+            )}
+          </div>
           <div className="space-y-2">
             <label className="block text-sm font-medium text-gray-700">Images</label>
             <textarea
@@ -958,6 +990,217 @@ const AdminDashboard = () => {
     </div>
   );
 
+  const renderCategories = () => {
+    const handleCategoryImageUpload = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        setCategoryImageUploading(true);
+        const validation = validateImageFile(file);
+        if (!validation.valid) { showMessage(validation.error, 'error'); return; }
+        const base64 = await convertFileToBase64(file);
+        setCategoryForm(prev => ({ ...prev, image: base64 }));
+        showMessage('Image uploaded');
+      } catch { showMessage('Image upload failed', 'error'); }
+      finally { setCategoryImageUploading(false); }
+    };
+
+    const handleSaveCategory = async () => {
+      if (!categoryForm.name.trim()) { showMessage('Category name is required', 'error'); return; }
+      setLoading(true);
+      try {
+        const data = {
+          ...categoryForm,
+          name: categoryForm.name.trim(),
+          sortOrder: Number(categoryForm.sortOrder) || (categories.length + 1),
+          visible: Boolean(categoryForm.visible),
+          featured: Boolean(categoryForm.featured),
+        };
+        if (editingCategory) {
+          await updateCategory(editingCategory.id, data);
+          showMessage('Category updated');
+        } else {
+          await addCategory(data);
+          showMessage('Category added');
+        }
+        setEditingCategory(null);
+        setCategoryForm(emptyCategoryForm);
+      } catch { showMessage('Failed to save category', 'error'); }
+      finally { setLoading(false); }
+    };
+
+    const handleDeleteCategory = async (id) => {
+      const inUse = products.some(p => {
+        const cat = categories.find(c => c.id === id);
+        return cat && p.category === cat.name;
+      });
+      if (inUse && !confirm('This category is used by products. Delete anyway?')) return;
+      if (!inUse && !confirm('Delete this category?')) return;
+      try {
+        await deleteCategory(id);
+        showMessage('Category deleted');
+      } catch { showMessage('Failed to delete category', 'error'); }
+    };
+
+    return (
+      <div className="space-y-6">
+        {/* Form */}
+        <Card title={editingCategory ? 'Edit Category' : 'Add New Category'}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Category Name *"
+              value={categoryForm.name}
+              onChange={e => setCategoryForm({ ...categoryForm, name: e.target.value })}
+              placeholder="e.g. Jute Bags"
+            />
+            <Input
+              label="Sort Order"
+              type="number"
+              value={categoryForm.sortOrder}
+              onChange={e => setCategoryForm({ ...categoryForm, sortOrder: e.target.value })}
+              placeholder="1"
+            />
+            <div className="md:col-span-2 space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Category Image</label>
+              {categoryForm.image && (
+                <div className="relative inline-block">
+                  <img src={categoryForm.image} alt="Preview" className="w-32 h-32 object-cover rounded-xl border border-gray-200" />
+                  <button onClick={() => setCategoryForm({ ...categoryForm, image: '' })} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+              <div className="flex gap-3 items-center">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleCategoryImageUpload}
+                  className="hidden"
+                  id="catImageUpload"
+                />
+                <label htmlFor="catImageUpload" className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer text-sm">
+                  <Upload className="w-4 h-4" />
+                  {categoryImageUploading ? 'Uploading…' : 'Upload Image'}
+                </label>
+                <span className="text-xs text-gray-400">or paste URL below</span>
+              </div>
+              <input
+                type="text"
+                value={categoryForm.image}
+                onChange={e => setCategoryForm({ ...categoryForm, image: e.target.value })}
+                placeholder="https://... or leave blank"
+                className="w-full p-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+              <textarea
+                value={categoryForm.description}
+                onChange={e => setCategoryForm({ ...categoryForm, description: e.target.value })}
+                placeholder="Short description shown on the categories page"
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                rows={2}
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex gap-6">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" checked={categoryForm.visible} onChange={e => setCategoryForm({ ...categoryForm, visible: e.target.checked })} />
+              <span className="text-sm font-medium text-gray-700">Visible to customers</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" checked={categoryForm.featured} onChange={e => setCategoryForm({ ...categoryForm, featured: e.target.checked })} />
+              <span className="text-sm font-medium text-gray-700">Featured on homepage</span>
+            </label>
+          </div>
+          <div className="mt-4 flex gap-3">
+            <button
+              onClick={handleSaveCategory}
+              disabled={loading}
+              className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+            >
+              <Save className="w-4 h-4" />
+              {loading ? 'Saving…' : editingCategory ? 'Update Category' : 'Add Category'}
+            </button>
+            {editingCategory && (
+              <button
+                onClick={() => { setEditingCategory(null); setCategoryForm(emptyCategoryForm); }}
+                className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+              >
+                <X className="w-4 h-4" />
+                Cancel
+              </button>
+            )}
+          </div>
+        </Card>
+
+        {/* List */}
+        <Card title={`Category List (${categories.length})`}>
+          {categories.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              <Tags className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+              <p className="font-medium">No categories yet</p>
+              <p className="text-sm mt-1">Add categories above — they will appear in the product form and on user-facing pages.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[...categories].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)).map(cat => {
+                const productCount = products.filter(p => p.category === cat.name).length;
+                return (
+                  <div key={cat.id} className={`rounded-xl border p-4 flex gap-3 ${cat.visible ? 'border-emerald-200 bg-white' : 'border-gray-200 bg-gray-50 opacity-70'}`}>
+                    {cat.image ? (
+                      <img src={cat.image} alt={cat.name} className="w-16 h-16 rounded-lg object-cover shrink-0 border border-gray-100" />
+                    ) : (
+                      <div className="w-16 h-16 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+                        <Tags className="w-6 h-6 text-emerald-600" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-1">
+                        <p className="font-semibold text-gray-800 truncate">{cat.name}</p>
+                        <div className="flex gap-1 shrink-0">
+                          {cat.featured && <span className="text-[10px] px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded-full font-semibold">Featured</span>}
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${cat.visible ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-600'}`}>
+                            {cat.visible ? 'Visible' : 'Hidden'}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">{productCount} product{productCount !== 1 ? 's' : ''}</p>
+                      {cat.description && <p className="text-xs text-gray-400 mt-1 line-clamp-1">{cat.description}</p>}
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={() => { setEditingCategory(cat); setCategoryForm({ name: cat.name, image: cat.image || '', description: cat.description || '', sortOrder: cat.sortOrder || '', visible: cat.visible !== false, featured: Boolean(cat.featured) }); }}
+                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
+                          title="Edit"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => toggleCategoryVisibility(cat.id)}
+                          className="p-1.5 text-gray-600 hover:bg-gray-100 rounded"
+                          title={cat.visible ? 'Hide' : 'Show'}
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCategory(cat.id)}
+                          className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
+
   const renderOrders = () => (
     <div className="space-y-6">
       {/* Order filters */}
@@ -983,8 +1226,8 @@ const AdminDashboard = () => {
           ))}
         </div>
         {/* Date filters */}
-        <div className="flex flex-wrap gap-2 mb-6">
-          {['all', 'today', 'this-week', 'this-month', 'this-year'].map(filter => (
+        <div className="flex flex-wrap gap-2 mb-4">
+          {['all', 'today', 'this-week', 'this-month', 'this-year', 'custom'].map(filter => (
             <button
               key={filter}
               onClick={() => setActiveDateFilter(filter)}
@@ -997,10 +1240,41 @@ const AdminDashboard = () => {
               {filter === 'all' ? 'All Time' : 
                filter === 'today' ? 'Today' : 
                filter === 'this-week' ? 'This Week' :
-               filter === 'this-month' ? 'This Month' : 'This Year'}
+               filter === 'this-month' ? 'This Month' :
+               filter === 'this-year' ? 'This Year' : 'Custom Range'}
             </button>
           ))}
         </div>
+        {activeDateFilter === 'custom' && (
+          <div className="flex flex-wrap items-center gap-3 mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-700">From:</label>
+              <input
+                type="date"
+                value={customDateFrom}
+                onChange={e => setCustomDateFrom(e.target.value)}
+                className="p-2 border border-gray-300 rounded-lg text-sm"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-700">To:</label>
+              <input
+                type="date"
+                value={customDateTo}
+                onChange={e => setCustomDateTo(e.target.value)}
+                className="p-2 border border-gray-300 rounded-lg text-sm"
+              />
+            </div>
+            {(customDateFrom || customDateTo) && (
+              <button
+                onClick={() => { setCustomDateFrom(''); setCustomDateTo(''); }}
+                className="px-3 py-2 text-sm text-gray-600 hover:text-red-600 bg-white border border-gray-200 rounded-lg"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -1074,14 +1348,12 @@ const AdminDashboard = () => {
 
   const renderAnalytics = () => {
     const now = new Date();
-    
-    const getStats = (filter) => {
-      const filtered = filterOrdersByDate(orders, filter);
+
+    const getStats = (filter, from, to) => {
+      const filtered = filterOrdersByDate(orders, filter, from, to);
       const delivered = filtered.filter(o => o.status === 'Delivered');
       const cancelled = filtered.filter(o => o.status === 'Cancelled');
-      
       const revenue = delivered.reduce((sum, o) => sum + (o.total || o.grandTotal || 0), 0);
-      
       return {
         orders: filtered.length,
         delivered: delivered.length,
@@ -1095,6 +1367,7 @@ const AdminDashboard = () => {
     const monthStats = getStats('this-month');
     const yearStats = getStats('this-year');
     const allTimeStats = getStats('all');
+    const customStats = getStats('custom', analyticsFrom, analyticsTo);
 
     return (
       <div className="space-y-6">
@@ -1130,6 +1403,75 @@ const AdminDashboard = () => {
               icon={XCircle} 
               color="bg-red-500" 
             />
+          </div>
+        </Card>
+
+        {/* Custom Date Range Analytics */}
+        <Card title="Custom Date Range Analytics">
+          <div className="flex flex-wrap items-center gap-3 mb-6 p-4 bg-emerald-50 rounded-xl border border-emerald-200">
+            <span className="text-sm font-semibold text-emerald-800">Select Range:</span>
+            <div className="flex flex-wrap gap-2">
+              {['today', 'this-week', 'this-month', 'this-year', 'all', 'custom'].map(f => (
+                <button
+                  key={f}
+                  onClick={() => setAnalyticsFilter(f)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    analyticsFilter === f ? 'bg-emerald-600 text-white' : 'bg-white text-gray-700 hover:bg-emerald-100 border border-emerald-200'
+                  }`}
+                >
+                  {f === 'all' ? 'All Time' : f === 'this-week' ? 'This Week' : f === 'this-month' ? 'This Month' : f === 'this-year' ? 'This Year' : f.charAt(0).toUpperCase() + f.slice(1)}
+                </button>
+              ))}
+            </div>
+            {analyticsFilter === 'custom' && (
+              <div className="flex flex-wrap items-center gap-3 mt-2 w-full">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700">From:</label>
+                  <input
+                    type="date"
+                    value={analyticsFrom}
+                    onChange={e => setAnalyticsFrom(e.target.value)}
+                    className="p-2 border border-gray-300 rounded-lg text-sm"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700">To:</label>
+                  <input
+                    type="date"
+                    value={analyticsTo}
+                    onChange={e => setAnalyticsTo(e.target.value)}
+                    className="p-2 border border-gray-300 rounded-lg text-sm"
+                  />
+                </div>
+                {(analyticsFrom || analyticsTo) && (
+                  <button
+                    onClick={() => { setAnalyticsFrom(''); setAnalyticsTo(''); }}
+                    className="px-3 py-1.5 text-sm text-gray-600 hover:text-red-600 bg-white border border-gray-200 rounded-lg"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 bg-blue-50 rounded-xl border border-blue-200">
+              <p className="text-sm text-blue-700 font-medium mb-1">Orders</p>
+              <p className="text-3xl font-bold text-blue-800">{customStats.orders}</p>
+            </div>
+            <div className="p-4 bg-green-50 rounded-xl border border-green-200">
+              <p className="text-sm text-green-700 font-medium mb-1">Delivered</p>
+              <p className="text-3xl font-bold text-green-800">{customStats.delivered}</p>
+            </div>
+            <div className="p-4 bg-red-50 rounded-xl border border-red-200">
+              <p className="text-sm text-red-700 font-medium mb-1">Cancelled</p>
+              <p className="text-3xl font-bold text-red-800">{customStats.cancelled}</p>
+            </div>
+            <div className="p-4 bg-purple-50 rounded-xl border border-purple-200">
+              <p className="text-sm text-purple-700 font-medium mb-1">Revenue</p>
+              <p className="text-3xl font-bold text-purple-800">₹{customStats.revenue.toLocaleString()}</p>
+            </div>
           </div>
         </Card>
 
@@ -2133,6 +2475,7 @@ const AdminDashboard = () => {
 
           {activeTab === 'overview' && renderOverview()}
           {activeTab === 'analytics' && renderAnalytics()}
+          {activeTab === 'categories' && renderCategories()}
           {activeTab === 'products' && renderProducts()}
           {activeTab === 'orders' && renderOrders()}
           {activeTab === 'customers' && renderCustomers()}

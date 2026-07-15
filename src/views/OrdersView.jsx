@@ -8,14 +8,14 @@ const OrdersView = () => {
   const { orders } = useCart();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 pb-16">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-24 sm:pt-28 pb-16">
       <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8">
         <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-gray-600 hover:text-emerald-600 mb-6 transition-colors">
           <ArrowLeft className="w-5 h-5" />
           <span className="font-medium">Back</span>
         </button>
 
-        <h1 className="text-2xl md:text-3xl md:text-4xl font-bold text-gradient mb-2">My Orders</h1>
+        <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gradient mb-2 mt-2">My Orders</h1>
         <p className="text-xs sm:text-sm text-gray-600 mb-8">Tap any order to open shipping, tracking, cancellation, and invoice details.</p>
 
         {orders.length === 0 ? (

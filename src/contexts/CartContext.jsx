@@ -1,20 +1,22 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { db, isFirebaseActive } from '../firebase/config';
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { sendOrderStatusNotification } from '../services/notificationService';
 import { sendOrderStatusEmail } from '../services/emailService';
+import { useAuth } from './AuthContext';
 
 const CartContext = createContext();
 
 const STORAGE_KEYS = {
   cart: 'cart',
   wishlist: 'wishlist',
-  orders: 'saran-jute-orders',
-  addresses: 'saran-jute-addresses',
   coupons: 'saran-jute-coupons',
   latestOrder: 'saran-jute-latest-order',
   pricingSettings: 'saran-jute-pricing-settings',
 };
+
+// Per-user storage keys (scoped by uid)
+const userStorageKey = (uid, key) => `${key}-${uid}`;
 
 const readJson = (key, fallback) => {
   try {
@@ -38,32 +40,17 @@ export const useCart = () => {
 };
 
 export const CartProvider = ({ children }) => {
-  const [cart, setCart] = useState(() => {
-    return readJson(STORAGE_KEYS.cart, []);
-  });
+  const { user } = useAuth();
+  const uid = user?.uid || null;
 
-  const [wishlist, setWishlist] = useState(() => {
-    return readJson(STORAGE_KEYS.wishlist, []);
-  });
+  const [cart, setCart] = useState(() => readJson(STORAGE_KEYS.cart, []));
+  const [wishlist, setWishlist] = useState(() => readJson(STORAGE_KEYS.wishlist, []));
 
-  const [addresses, setAddresses] = useState(() => readJson(STORAGE_KEYS.addresses, []));
-  const [orders, setOrders] = useState(() => readJson(STORAGE_KEYS.orders, []));
-  const [latestOrder, setLatestOrder] = useState(() => readJson(STORAGE_KEYS.latestOrder, null));
+  // User-scoped orders and addresses — start empty, loaded after uid resolves
+  const [addresses, setAddresses] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [latestOrder, setLatestOrder] = useState(null);
 
-  const syncLocalOrders = (nextOrders) => {
-    setOrders(nextOrders);
-    writeJson(STORAGE_KEYS.orders, nextOrders);
-  };
-
-  const syncLocalAddresses = (nextAddresses) => {
-    setAddresses(nextAddresses);
-    writeJson(STORAGE_KEYS.addresses, nextAddresses);
-  };
-
-  const syncLocalCoupons = (nextCoupons) => {
-    setCoupons(nextCoupons);
-    writeJson(STORAGE_KEYS.coupons, nextCoupons);
-  };
   const [pricingSettings, setPricingSettings] = useState(() => readJson(STORAGE_KEYS.pricingSettings, {
     gstRate: 18,
     shippingCharge: 40,
@@ -76,32 +63,92 @@ export const CartProvider = ({ children }) => {
     { id: 'save50', code: 'SAVE50', label: 'Festival Savings', discount: 'Flat ₹50 OFF', active: true, shouldPopup: false },
   ]));
 
-  // Sync with Firestore if active
+  // Track active Firestore unsubscribers so we can tear down when user changes
+  const unsubOrdersRef = useRef(null);
+  const unsubAddressesRef = useRef(null);
+
+  const syncLocalOrders = (nextOrders) => {
+    setOrders(nextOrders);
+    if (uid) writeJson(userStorageKey(uid, 'saran-jute-orders'), nextOrders);
+  };
+
+  const syncLocalAddresses = (nextAddresses) => {
+    setAddresses(nextAddresses);
+    if (uid) writeJson(userStorageKey(uid, 'saran-jute-addresses'), nextAddresses);
+  };
+
+  const syncLocalCoupons = (nextCoupons) => {
+    setCoupons(nextCoupons);
+    writeJson(STORAGE_KEYS.coupons, nextCoupons);
+  };
+
+  // ─── Re-subscribe whenever the logged-in user changes ───────────────────────
+  useEffect(() => {
+    // Tear down previous subscriptions
+    if (unsubOrdersRef.current) { unsubOrdersRef.current(); unsubOrdersRef.current = null; }
+    if (unsubAddressesRef.current) { unsubAddressesRef.current(); unsubAddressesRef.current = null; }
+
+    if (!uid) {
+      // Not logged in — clear user-scoped data
+      setOrders([]);
+      setAddresses([]);
+      setLatestOrder(null);
+      return;
+    }
+
+    // Load from local storage for this user while Firestore connects
+    setOrders(readJson(userStorageKey(uid, 'saran-jute-orders'), []));
+    setAddresses(readJson(userStorageKey(uid, 'saran-jute-addresses'), []));
+    setLatestOrder(readJson(userStorageKey(uid, 'saran-jute-latest-order'), null));
+
+    if (!isFirebaseActive) return;
+
+    // Subscribe to user-scoped orders: users/{uid}/orders
+    unsubOrdersRef.current = onSnapshot(
+      collection(db, 'users', uid, 'orders'),
+      (snap) => {
+        const docs = [];
+        snap.forEach(d => docs.push(d.data()));
+        docs.sort((a, b) => {
+          // Sort by createdAt descending if available, else id
+          const ta = a.createdAt || a.id || '';
+          const tb = b.createdAt || b.id || '';
+          return tb.localeCompare(ta);
+        });
+        setOrders(docs);
+        writeJson(userStorageKey(uid, 'saran-jute-orders'), docs);
+      },
+      (error) => {
+        console.warn('Orders sync unavailable; using local fallback.', error?.message || error);
+        setOrders(readJson(userStorageKey(uid, 'saran-jute-orders'), []));
+      }
+    );
+
+    // Subscribe to user-scoped addresses: users/{uid}/addresses
+    unsubAddressesRef.current = onSnapshot(
+      collection(db, 'users', uid, 'addresses'),
+      (snap) => {
+        const docs = [];
+        snap.forEach(d => docs.push(d.data()));
+        setAddresses(docs);
+        writeJson(userStorageKey(uid, 'saran-jute-addresses'), docs);
+      },
+      (error) => {
+        console.warn('Addresses sync unavailable; using local fallback.', error?.message || error);
+        setAddresses(readJson(userStorageKey(uid, 'saran-jute-addresses'), []));
+      }
+    );
+
+    return () => {
+      if (unsubOrdersRef.current) { unsubOrdersRef.current(); unsubOrdersRef.current = null; }
+      if (unsubAddressesRef.current) { unsubAddressesRef.current(); unsubAddressesRef.current = null; }
+    };
+  }, [uid]);
+
+  // ─── Global collections (coupons, pricing) ──────────────────────────────────
   useEffect(() => {
     if (!isFirebaseActive) return;
 
-    // A. Orders
-    const unsubOrders = onSnapshot(collection(db, 'orders'), (snap) => {
-      const docs = [];
-      snap.forEach(d => docs.push(d.data()));
-      docs.sort((a, b) => b.id.localeCompare(a.id));
-      setOrders(docs);
-    }, (error) => {
-      console.warn('Orders sync unavailable; using local fallback.', error?.message || error);
-      setOrders(readJson(STORAGE_KEYS.orders, []));
-    });
-
-    // B. Addresses
-    const unsubAddresses = onSnapshot(collection(db, 'addresses'), (snap) => {
-      const docs = [];
-      snap.forEach(d => docs.push(d.data()));
-      setAddresses(docs);
-    }, (error) => {
-      console.warn('Addresses sync unavailable; using local fallback.', error?.message || error);
-      setAddresses(readJson(STORAGE_KEYS.addresses, []));
-    });
-
-    // C. Coupons
     const unsubCoupons = onSnapshot(collection(db, 'coupons'), (snap) => {
       if (snap.empty) {
         const defaultCoupons = [
@@ -120,7 +167,6 @@ export const CartProvider = ({ children }) => {
       setCoupons(readJson(STORAGE_KEYS.coupons, []));
     });
 
-    // D. Pricing Settings
     const unsubPricing = onSnapshot(doc(db, 'settings', 'pricing'), (snap) => {
       if (snap.exists()) {
         setPricingSettings(snap.data());
@@ -141,40 +187,19 @@ export const CartProvider = ({ children }) => {
     });
 
     return () => {
-      unsubOrders();
-      unsubAddresses();
       unsubCoupons();
       unsubPricing();
     };
   }, []);
 
-  useEffect(() => {
-    writeJson(STORAGE_KEYS.cart, cart);
-  }, [cart]);
+  useEffect(() => { writeJson(STORAGE_KEYS.cart, cart); }, [cart]);
+  useEffect(() => { writeJson(STORAGE_KEYS.wishlist, wishlist); }, [wishlist]);
 
   useEffect(() => {
-    writeJson(STORAGE_KEYS.wishlist, wishlist);
-  }, [wishlist]);
-
-  useEffect(() => {
-    if (!isFirebaseActive) {
-      writeJson(STORAGE_KEYS.addresses, addresses);
+    if (latestOrder && uid) {
+      writeJson(userStorageKey(uid, 'saran-jute-latest-order'), latestOrder);
     }
-  }, [addresses]);
-
-  useEffect(() => {
-    if (!isFirebaseActive) {
-      writeJson(STORAGE_KEYS.orders, orders);
-    }
-  }, [orders]);
-
-  useEffect(() => {
-    if (latestOrder) {
-      writeJson(STORAGE_KEYS.latestOrder, latestOrder);
-    } else {
-      localStorage.removeItem(STORAGE_KEYS.latestOrder);
-    }
-  }, [latestOrder]);
+  }, [latestOrder, uid]);
 
   useEffect(() => {
     if (!isFirebaseActive) {
@@ -188,6 +213,7 @@ export const CartProvider = ({ children }) => {
     }
   }, [pricingSettings]);
 
+  // ─── Cart ────────────────────────────────────────────────────────────────────
   const addToCart = (product, quantity = 1, customText = '', customLogo = '') => {
     setCart(prev => {
       const existingIndex = prev.findIndex(item => item.id === product.id && item.customText === customText && item.customLogo === customLogo);
@@ -198,36 +224,23 @@ export const CartProvider = ({ children }) => {
       }
       return [...prev, { ...product, quantity, customText, customLogo }];
     });
-    setCartToast({
-      id: product.id,
-      name: product.name,
-      quantity,
-    });
+    setCartToast({ id: product.id, name: product.name, quantity });
   };
 
   const updateQuantity = (productId, quantity) => {
-    if (quantity <= 0) {
-      removeFromCart(productId);
-      return;
-    }
-    setCart(prev => 
-      prev.map(item => 
-        item.id === productId 
-          ? { ...item, quantity }
-          : item
-      )
-    );
+    if (quantity <= 0) { removeFromCart(productId); return; }
+    setCart(prev => prev.map(item => item.id === productId ? { ...item, quantity } : item));
   };
 
   const removeFromCart = (productId) => {
     setCart(prev => prev.filter(item => item.id !== productId));
   };
 
-  const clearCart = () => {
-    setCart([]);
-  };
+  const clearCart = () => { setCart([]); };
 
+  // ─── Addresses (user-scoped) ─────────────────────────────────────────────────
   const addAddress = (address) => {
+    if (!uid) return;
     const id = address.id || `addr-${Date.now()}`;
     const nextAddress = {
       id,
@@ -235,98 +248,79 @@ export const CartProvider = ({ children }) => {
       ...address,
     };
 
+    const nextAddresses = [
+      nextAddress,
+      ...addresses.map(item => ({ ...item, isDefault: nextAddress.isDefault ? false : item.isDefault })),
+    ];
+
     if (isFirebaseActive) {
-      const nextAddresses = [
-        nextAddress,
-        ...addresses.map(item => ({ ...item, isDefault: nextAddress.isDefault ? false : item.isDefault })),
-      ];
-
-      setDoc(doc(db, 'addresses', id), nextAddress)
-        .catch(() => {
-          syncLocalAddresses(nextAddresses);
-        });
-
+      setDoc(doc(db, 'users', uid, 'addresses', id), nextAddress).catch(() => {
+        syncLocalAddresses(nextAddresses);
+      });
       if (nextAddress.isDefault) {
         addresses.forEach(a => {
           if (a.id !== id && a.isDefault) {
-            setDoc(doc(db, 'addresses', a.id), { ...a, isDefault: false }).catch(() => undefined);
+            setDoc(doc(db, 'users', uid, 'addresses', a.id), { ...a, isDefault: false }).catch(() => undefined);
           }
         });
       }
     } else {
-      setAddresses(prev => {
-        const next = [
-          nextAddress,
-          ...prev.map(item => ({ ...item, isDefault: nextAddress.isDefault ? false : item.isDefault })),
-        ];
-        return next;
-      });
+      syncLocalAddresses(nextAddresses);
     }
   };
 
   const updateAddress = (addressId, updates) => {
+    if (!uid) return;
     if (isFirebaseActive) {
       const existing = addresses.find(a => a.id === addressId);
       if (existing) {
-        setDoc(doc(db, 'addresses', addressId), { ...existing, ...updates }).catch(() => {
-          const nextAddresses = addresses.map(address => (
-            address.id === addressId
-              ? { ...address, ...updates }
-              : updates.isDefault
-                ? { ...address, isDefault: false }
-                : address
-          ));
-          syncLocalAddresses(nextAddresses);
+        setDoc(doc(db, 'users', uid, 'addresses', addressId), { ...existing, ...updates }).catch(() => {
+          syncLocalAddresses(addresses.map(a => a.id === addressId ? { ...a, ...updates } : updates.isDefault ? { ...a, isDefault: false } : a));
         });
       }
     } else {
-      setAddresses(prev => prev.map(address => (
-        address.id === addressId
-          ? { ...address, ...updates }
-          : updates.isDefault
-            ? { ...address, isDefault: false }
-            : address
-      )));
+      setAddresses(prev => prev.map(a => a.id === addressId ? { ...a, ...updates } : updates.isDefault ? { ...a, isDefault: false } : a));
     }
   };
 
   const removeAddress = (addressId) => {
+    if (!uid) return;
     if (isFirebaseActive) {
-      deleteDoc(doc(db, 'addresses', addressId)).catch(() => {
-        syncLocalAddresses(addresses.filter(address => address.id !== addressId));
+      deleteDoc(doc(db, 'users', uid, 'addresses', addressId)).catch(() => {
+        syncLocalAddresses(addresses.filter(a => a.id !== addressId));
       });
     } else {
-      setAddresses(prev => prev.filter(address => address.id !== addressId));
+      setAddresses(prev => prev.filter(a => a.id !== addressId));
     }
   };
 
   const setDefaultAddress = (addressId) => {
+    if (!uid) return;
     if (isFirebaseActive) {
-      addresses.forEach(address => {
-        setDoc(doc(db, 'addresses', address.id), {
-          ...address,
-          isDefault: address.id === addressId,
-        }).catch(() => undefined);
+      addresses.forEach(a => {
+        setDoc(doc(db, 'users', uid, 'addresses', a.id), { ...a, isDefault: a.id === addressId }).catch(() => undefined);
       });
     } else {
-      setAddresses(prev => prev.map(address => ({
-        ...address,
-        isDefault: address.id === addressId,
-      })));
+      setAddresses(prev => prev.map(a => ({ ...a, isDefault: a.id === addressId })));
     }
   };
 
+  // ─── Orders (user-scoped + also mirror to top-level for admin) ───────────────
   const triggerOrderNotification = (order, status) => {
     sendOrderStatusNotification(order, status).catch(err => console.error('OneSignal Notification error:', err));
   };
 
   const addOrder = (order) => {
+    if (!uid) return;
+
     const nextOrder = {
       ...order,
-      userEmail: order.userEmail || order.shippingAddress?.email || order.billingAddress?.email || '',
+      userId: uid,
+      userEmail: order.userEmail || order.shippingAddress?.email || '',
+      customOrder: order.customOrder || null,
       shippingAddress: {
         ...order.shippingAddress,
-        email: order.shippingAddress?.email || order.userEmail || order.billingAddress?.email || '',
+        email: order.shippingAddress?.email || order.userEmail || '',
       },
       billingAddress: {
         ...(order.billingAddress || order.shippingAddress),
@@ -341,15 +335,19 @@ export const CartProvider = ({ children }) => {
         { status: 'Placed', timestamp: order.date || new Date().toLocaleString(), note: 'Order placed by customer' },
         { status: 'Confirmed', timestamp: order.date || new Date().toLocaleString(), note: 'Order confirmed automatically' },
       ],
+      createdAt: new Date().toISOString(),
     };
 
     if (isFirebaseActive) {
-      setDoc(doc(db, 'orders', order.id), nextOrder).catch(() => {
+      // Save to user-scoped path so user sees only their orders
+      setDoc(doc(db, 'users', uid, 'orders', order.id), nextOrder).catch(() => {
         const nextOrders = [nextOrder, ...orders.filter(item => item.id !== nextOrder.id)];
         syncLocalOrders(nextOrders);
       });
+      // Also mirror to top-level orders collection for admin visibility
+      setDoc(doc(db, 'orders', order.id), nextOrder).catch(() => undefined);
     } else {
-      setOrders(prev => [nextOrder, ...prev]);
+      syncLocalOrders([nextOrder, ...orders.filter(item => item.id !== nextOrder.id)]);
     }
 
     triggerOrderNotification(nextOrder, 'Confirmed');
@@ -362,7 +360,6 @@ export const CartProvider = ({ children }) => {
 
     const newTimeline = [...(existing.orderTimeline || [])];
     let newStatus = existing.status;
-    let newTrackingStage = existing.trackingStage;
 
     if (updates.status && updates.status !== existing.status) {
       newStatus = updates.status;
@@ -373,49 +370,41 @@ export const CartProvider = ({ children }) => {
       });
     }
 
-    if (updates.trackingStage) {
-      newTrackingStage = updates.trackingStage;
-    }
-
     const { timelineNote, ...restUpdates } = updates;
     const nextOrder = {
       ...existing,
       ...restUpdates,
-      userEmail: updates.userEmail || existing.userEmail || existing.shippingAddress?.email || existing.billingAddress?.email || '',
+      userEmail: updates.userEmail || existing.userEmail || existing.shippingAddress?.email || '',
       shippingAddress: {
         ...existing.shippingAddress,
         ...updates.shippingAddress,
-        email:
-          updates.shippingAddress?.email ||
-          existing.shippingAddress?.email ||
-          updates.userEmail ||
-          existing.userEmail ||
-          '',
+        email: updates.shippingAddress?.email || existing.shippingAddress?.email || updates.userEmail || existing.userEmail || '',
       },
       billingAddress: {
         ...existing.billingAddress,
         ...updates.billingAddress,
-        email:
-          updates.billingAddress?.email ||
-          existing.billingAddress?.email ||
-          updates.shippingAddress?.email ||
-          existing.shippingAddress?.email ||
-          updates.userEmail ||
-          existing.userEmail ||
-          '',
+        email: updates.billingAddress?.email || existing.billingAddress?.email || updates.shippingAddress?.email || existing.shippingAddress?.email || updates.userEmail || existing.userEmail || '',
       },
       status: newStatus,
-      trackingStage: newTrackingStage,
       orderTimeline: newTimeline,
     };
 
+    const orderUserId = existing.userId || uid;
+
     if (isFirebaseActive) {
+      // Update in user-scoped path
+      if (orderUserId) {
+        setDoc(doc(db, 'users', orderUserId, 'orders', orderId), nextOrder).catch(() => undefined);
+      }
+      // Update in top-level admin collection
       setDoc(doc(db, 'orders', orderId), nextOrder).catch(() => {
-        const nextOrders = orders.map(order => order.id === orderId ? nextOrder : order);
-        syncLocalOrders(nextOrders);
+        if (uid) {
+          const nextOrders = orders.map(o => o.id === orderId ? nextOrder : o);
+          syncLocalOrders(nextOrders);
+        }
       });
     } else {
-      setOrders(prev => prev.map(order => order.id === orderId ? nextOrder : order));
+      setOrders(prev => prev.map(o => o.id === orderId ? nextOrder : o));
     }
 
     setLatestOrder(prev => (prev && prev.id === orderId ? nextOrder : prev));
@@ -427,26 +416,23 @@ export const CartProvider = ({ children }) => {
   };
 
   const cancelOrder = (orderId, cancelReason) => {
-    const cancelledAt = new Date().toLocaleString();
     updateOrder(orderId, {
       status: 'Cancelled',
       cancelReason,
-      cancelledAt,
+      cancelledAt: new Date().toLocaleString(),
     });
   };
 
+  // ─── Pricing ─────────────────────────────────────────────────────────────────
   const updatePricingSettings = (updates) => {
     if (isFirebaseActive) {
       setDoc(doc(db, 'settings', 'pricing'), { ...pricingSettings, ...updates }).catch(() => {
-        const nextPricing = { ...pricingSettings, ...updates };
-        setPricingSettings(nextPricing);
-        writeJson(STORAGE_KEYS.pricingSettings, nextPricing);
+        const next = { ...pricingSettings, ...updates };
+        setPricingSettings(next);
+        writeJson(STORAGE_KEYS.pricingSettings, next);
       });
     } else {
-      setPricingSettings(prev => ({
-        ...prev,
-        ...updates,
-      }));
+      setPricingSettings(prev => ({ ...prev, ...updates }));
     }
   };
 
@@ -455,7 +441,6 @@ export const CartProvider = ({ children }) => {
     const taxableAmount = Math.max(subtotal - discountAmount, 0);
     const gstAmount = Math.round(taxableAmount * (pricingSettings.gstRate / 100) * 100) / 100;
     const grandTotal = Math.round((taxableAmount + shipping + gstAmount) * 100) / 100;
-
     return {
       subtotal: Math.round(subtotal * 100) / 100,
       discountAmount: Math.round(discountAmount * 100) / 100,
@@ -466,26 +451,25 @@ export const CartProvider = ({ children }) => {
     };
   };
 
-  const setLatestOrderItem = (order) => {
-    setLatestOrder(order);
-  };
+  const setLatestOrderItem = (order) => { setLatestOrder(order); };
 
   const clearOrders = () => {
+    if (!uid) return;
     if (isFirebaseActive) {
-      orders.forEach(o => deleteDoc(doc(db, 'orders', o.id)));
+      orders.forEach(o => {
+        deleteDoc(doc(db, 'users', uid, 'orders', o.id)).catch(() => undefined);
+      });
     } else {
       setOrders([]);
     }
   };
 
+  // ─── Coupons ─────────────────────────────────────────────────────────────────
   const addCoupon = (coupon) => {
     const id = coupon.id || `coupon-${Date.now()}`;
     const newCoupon = { ...coupon, id };
     if (isFirebaseActive) {
-      setDoc(doc(db, 'coupons', id), newCoupon).catch(() => {
-        const nextCoupons = [newCoupon, ...coupons.filter(item => item.id !== id)];
-        syncLocalCoupons(nextCoupons);
-      });
+      setDoc(doc(db, 'coupons', id), newCoupon).catch(() => syncLocalCoupons([newCoupon, ...coupons.filter(c => c.id !== id)]));
     } else {
       setCoupons(prev => [newCoupon, ...prev]);
     }
@@ -496,10 +480,7 @@ export const CartProvider = ({ children }) => {
     if (!existing) return;
     const newCoupon = { ...existing, ...updates };
     if (isFirebaseActive) {
-      setDoc(doc(db, 'coupons', couponId), newCoupon).catch(() => {
-        const nextCoupons = coupons.map(c => c.id === couponId ? newCoupon : c);
-        syncLocalCoupons(nextCoupons);
-      });
+      setDoc(doc(db, 'coupons', couponId), newCoupon).catch(() => syncLocalCoupons(coupons.map(c => c.id === couponId ? newCoupon : c)));
     } else {
       setCoupons(prev => prev.map(c => c.id === couponId ? newCoupon : c));
     }
@@ -507,9 +488,7 @@ export const CartProvider = ({ children }) => {
 
   const deleteCoupon = (couponId) => {
     if (isFirebaseActive) {
-      deleteDoc(doc(db, 'coupons', couponId)).catch(() => {
-        syncLocalCoupons(coupons.filter(c => c.id !== couponId));
-      });
+      deleteDoc(doc(db, 'coupons', couponId)).catch(() => syncLocalCoupons(coupons.filter(c => c.id !== couponId)));
     } else {
       setCoupons(prev => prev.filter(c => c.id !== couponId));
     }
@@ -517,34 +496,23 @@ export const CartProvider = ({ children }) => {
 
   const toggleCoupon = (couponId) => {
     const coupon = coupons.find(c => c.id === couponId);
-    if (coupon) {
-      updateCoupon(couponId, { active: !coupon.active });
-    }
+    if (coupon) updateCoupon(couponId, { active: !coupon.active });
   };
 
-  const updateCouponCode = (couponId, code) => {
-    updateCoupon(couponId, { code });
-  };
+  const updateCouponCode = (couponId, code) => updateCoupon(couponId, { code });
 
-  const dismissCartToast = () => {
-    setCartToast(null);
-  };
+  const dismissCartToast = () => { setCartToast(null); };
 
-  const getDefaultAddress = () => addresses.find(address => address.isDefault) || addresses[0] || null;
+  const getDefaultAddress = () => addresses.find(a => a.isDefault) || addresses[0] || null;
 
   const toggleWishlist = (product) => {
     setWishlist(prev => {
       const existing = prev.find(item => item.id === product.id);
-      if (existing) {
-        return prev.filter(item => item.id !== product.id);
-      }
-      return [...prev, product];
+      return existing ? prev.filter(item => item.id !== product.id) : [...prev, product];
     });
   };
 
-  const isInWishlist = (productId) => {
-    return wishlist.some(item => item.id === productId);
-  };
+  const isInWishlist = (productId) => wishlist.some(item => item.id === productId);
 
   const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
