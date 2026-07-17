@@ -71,7 +71,7 @@ export const ProductProvider = ({ children }) => {
       setLoading(false);
     }, (error) => {
       console.warn('Products sync unavailable; using local cache.', error?.message || error);
-      setProducts(readJson(STORAGE_KEYS.products, []));
+      setProducts(prev => prev.length === 0 ? readJson(STORAGE_KEYS.products, []) : prev);
       setLoading(false);
     });
 
@@ -92,7 +92,7 @@ export const ProductProvider = ({ children }) => {
       }
     }, (error) => {
       console.warn('Categories sync unavailable; using local cache.', error?.message || error);
-      setCategories(readJson(STORAGE_KEYS.categories, DEFAULT_CATEGORIES));
+      setCategories(prev => prev.length === 0 ? readJson(STORAGE_KEYS.categories, DEFAULT_CATEGORIES) : prev);
     });
 
     const unsubscribeInventory = onSnapshot(collection(db, 'inventoryHistory'), (snapshot) => {
