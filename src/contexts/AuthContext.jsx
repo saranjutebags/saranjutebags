@@ -29,8 +29,7 @@ const saveProfileSession = (profile) => {
 
 const isEmailAdmin = (email) => {
   if (!email) return false;
-  const lower = email.toLowerCase();
-  return lower === 'admin@gmail.com' || lower === 'saranjutebags@gmail.com' || lower === 'saranutebags@gmail.com';
+  return email.toLowerCase() === 'saranjutebags@gmail.com';
 };
 
 const buildProfileFromFirebaseUser = (firebaseUser, fallbackRole = 'customer') => {

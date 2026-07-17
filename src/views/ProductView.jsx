@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ShoppingBag, Heart, Star, ArrowLeft, Share2, Truck, ShieldCheck, RefreshCw, Check, X } from 'lucide-react';
+import { ShoppingBag, Heart, Star, ArrowLeft, Share2, Truck, ShieldCheck, RefreshCw, Check, X, ImagePlus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useProducts } from '../contexts/ProductContext';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
+import { convertFileToBase64 } from '../utils/imageUtils';
 
 const ProductView = () => {
   const { id } = useParams();
@@ -18,10 +19,13 @@ const ProductView = () => {
   const [customText, setCustomText] = useState('');
   const [customLogo, setCustomLogo] = useState('');
   const [logoName, setLogoName] = useState('');
+  const [currentImage, setCurrentImage] = useState(0);
   
   // Review state
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [newReview, setNewReview] = useState({ name: '', rating: 0, text: '' });
+  const [reviewImages, setReviewImages] = useState([]);
+  const [reviewImageUploading, setReviewImageUploading] = useState(false);
   
   // Share state
   const [showShareMenu, setShowShareMenu] = useState(false);
@@ -34,7 +38,10 @@ const ProductView = () => {
       navigate('/auth');
       return;
     }
-    addToCart(product, quantity, customText, customLogo);
+    addToCart(
+      { ...product, selectedImage: product.images[currentImage] || product.images[0] },
+      quantity, customText, customLogo
+    );
   };
 
   const handleAddReview = () => {
@@ -43,12 +50,34 @@ const ProductView = () => {
       return;
     }
     addReview(Number(id), {
-      name: newReview.name || (user ? user.name : 'Anonymous'),
+      name: newReview.name || (user ? user.displayName || user.email : 'Anonymous'),
       rating: newReview.rating,
-      text: newReview.text
+      text: newReview.text,
+      images: reviewImages
     });
     setNewReview({ name: '', rating: 0, text: '' });
+    setReviewImages([]);
     setShowReviewForm(false);
+  };
+
+  const handleReviewImageUpload = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setReviewImageUploading(true);
+    try {
+      for (const file of files) {
+        const base64 = await convertFileToBase64(file);
+        setReviewImages(prev => [...prev, base64]);
+      }
+    } catch (error) {
+      console.error('Failed to upload review image:', error);
+    } finally {
+      setReviewImageUploading(false);
+    }
+  };
+
+  const removeReviewImage = (index) => {
+    setReviewImages(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleShare = (platform) => {
@@ -68,7 +97,7 @@ const ProductView = () => {
 
   if (!product) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 pb-16 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16 flex items-center justify-center">
         <div className="text-center glass rounded-3xl p-12 border border-emerald-100">
           <div className="text-6xl mb-4">🌿</div>
           <h2 className="text-3xl font-bold text-gray-800 mb-4">Product not found</h2>
@@ -100,7 +129,7 @@ const ProductView = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-24 sm:pt-28 pb-16">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <button
           onClick={() => navigate(-1)}
@@ -117,12 +146,40 @@ const ProductView = () => {
             className="space-y-6"
           >
             <div className="glass rounded-3xl p-8 border border-emerald-100">
-              <div className="relative h-[400px] bg-gradient-to-br from-emerald-50 to-mint-50 rounded-2xl flex items-center justify-center overflow-hidden">
+              <div className="relative h-[400px] bg-gradient-to-br from-emerald-50 to-mint-50 rounded-2xl flex items-center justify-center overflow-hidden group">
                 <img
-                  src={product.images[0]}
+                  src={product.images[currentImage]}
                   alt={product.name}
-                  className="h-full w-full object-contain"
+                  className="h-full w-full object-contain transition-all duration-300"
                 />
+
+                {product.images.length > 1 && (
+                  <>
+                    <button
+                      onClick={() => setCurrentImage(prev => (prev === 0 ? product.images.length - 1 : prev - 1))}
+                      className="absolute left-2 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white text-gray-800 p-2 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <button
+                      onClick={() => setCurrentImage(prev => (prev === product.images.length - 1 ? 0 : prev + 1))}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white text-gray-800 p-2 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                    <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2">
+                      {product.images.map((_, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setCurrentImage(idx)}
+                          className={`w-2.5 h-2.5 rounded-full transition-all ${
+                            idx === currentImage ? 'bg-emerald-600 w-6' : 'bg-white/70 hover:bg-white'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
 
                 {/* Custom Overlay Mockup */}
                 {isCustomizable && (customText || customLogo) && (
@@ -148,7 +205,10 @@ const ProductView = () => {
                 {product.images.map((img, idx) => (
                   <button
                     key={idx}
-                    className="glass rounded-xl p-4 border border-emerald-100 hover:border-emerald-500 transition-all"
+                    onClick={() => setCurrentImage(idx)}
+                    className={`glass rounded-xl p-4 border transition-all ${
+                      idx === currentImage ? 'border-emerald-500 ring-2 ring-emerald-200' : 'border-emerald-100 hover:border-emerald-500'
+                    }`}
                   >
                     <img src={img} alt={`${product.name} ${idx + 1}`} className="h-20 w-full object-contain" />
                   </button>
@@ -177,10 +237,14 @@ const ProductView = () => {
               </div>
               <div className="flex items-baseline gap-4 mb-8">
                 <span className="text-4xl font-bold text-gradient">₹{product.price}</span>
-                <span className="text-2xl text-gray-400 line-through">₹{product.originalPrice}</span>
-                <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-sm font-semibold">
-                  {Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)}% OFF
-                </span>
+                {product.originalPrice > 0 && (
+                  <>
+                    <span className="text-2xl text-gray-400 line-through">₹{product.originalPrice}</span>
+                    <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-sm font-semibold">
+                      {Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)}% OFF
+                    </span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -191,10 +255,7 @@ const ProductView = () => {
                 <p className="text-gray-500 text-sm mb-1">Material</p>
                 <p className="font-semibold text-gray-800">{product.material}</p>
               </div>
-              <div className="glass rounded-xl p-4 border border-emerald-100">
-                <p className="text-gray-500 text-sm mb-1">Dimensions</p>
-                <p className="font-semibold text-gray-800">{product.dimensions}</p>
-              </div>
+
             </div>
 
             {/* Customization Panel */}
@@ -366,6 +427,39 @@ const ProductView = () => {
                       onChange={(e) => setNewReview({ ...newReview, text: e.target.value })}
                       className="w-full px-4 py-3 border border-gray-200 rounded-xl min-h-[120px]"
                     />
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Add Photos</label>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <label className="flex items-center gap-2 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-xl cursor-pointer transition-colors">
+                          <ImagePlus className="w-5 h-5 text-gray-600" />
+                          <span className="text-sm text-gray-600 font-medium">
+                            {reviewImageUploading ? 'Uploading...' : 'Upload Images'}
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={handleReviewImageUpload}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                      {reviewImages.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          {reviewImages.map((img, idx) => (
+                            <div key={idx} className="relative group">
+                              <img src={img} alt={`Review ${idx + 1}`} className="w-16 h-16 object-cover rounded-lg border border-gray-200" />
+                              <button
+                                onClick={() => removeReviewImage(idx)}
+                                className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 shadow opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     <div className="flex gap-3">
                       <button
                         onClick={handleAddReview}
@@ -385,8 +479,8 @@ const ProductView = () => {
               )}
 
               <div className="space-y-4">
-                {(product.customerReviews || []).length > 0 ? (
-                  product.customerReviews.map((review) => (
+                {(product.customerReviews || []).filter(r => !r.hidden).length > 0 ? (
+                  product.customerReviews.filter(r => !r.hidden).map((review) => (
                     <div key={review.id} className="glass rounded-2xl p-6 border border-emerald-100">
                       <div className="flex items-center justify-between mb-3">
                         <h4 className="font-semibold text-gray-800">{review.name}</h4>
@@ -405,6 +499,13 @@ const ProductView = () => {
                         ))}
                       </div>
                       <p className="text-gray-700">{review.text}</p>
+                      {review.images && review.images.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          {review.images.map((img, idx) => (
+                            <img key={idx} src={img} alt={`Review photo ${idx + 1}`} className="w-20 h-20 object-cover rounded-lg border border-gray-200" />
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))
                 ) : (

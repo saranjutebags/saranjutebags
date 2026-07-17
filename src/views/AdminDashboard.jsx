@@ -5,10 +5,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { useProducts } from '../contexts/ProductContext';
 import { useCart } from '../contexts/CartContext';
 import { useAdmin } from '../contexts/AdminContext';
-import { db } from '../firebase/config';
+import { db, isFirebaseActive } from '../firebase/config';
 import { doc, setDoc, deleteDoc, collection, onSnapshot } from 'firebase/firestore';
+import { getAuth, updatePassword } from 'firebase/auth';
 import { convertFileToBase64, validateImageFile } from '../utils/imageUtils';
-import { sendOrderStatusEmail } from '../services/emailService';
+import { getItemImage } from '../utils/orderImageUtils';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import {
@@ -40,15 +41,17 @@ import {
   XCircle,
   AlertCircle,
   Tags,
+  Star,
   ToggleLeft,
   ToggleRight,
+  History,
 } from 'lucide-react';
 
 const AdminDashboard = () => {
   const { user, signOut } = useAuth();
-  const { products, categories, addProduct, updateProduct, deleteProduct, addCategory, updateCategory, deleteCategory, toggleCategoryVisibility } = useProducts();
-  const { orders, updateOrder } = useCart();
-  const { companySettings, updateCompanySettings, banners, addBanner, updateBanner, deleteBanner } = useAdmin();
+  const { products, categories, addProduct, updateProduct, deleteProduct, addCategory, updateCategory, deleteCategory, toggleCategoryVisibility, deleteProductReview, toggleReviewVisibility } = useProducts();
+  const { orders, updateOrder, deleteOrders } = useCart();
+  const { companySettings, updateCompanySettings, banners, addBanner, updateBanner, deleteBanner, scrollingTexts, addScrollingText, updateScrollingText, deleteScrollingText, activityLogs, addActivityLog } = useAdmin();
   const navigate = useNavigate();
   
   const [activeTab, setActiveTab] = useState('overview');
@@ -66,12 +69,56 @@ const AdminDashboard = () => {
   const [productForm, setProductForm] = useState({
     name: '',
     price: '',
+    originalPrice: '',
+    discount: '',
+    discountType: 'percentage',
+    showDiscount: false,
+    material: '',
     stock: '',
     category: '',
     description: '',
     images: '',
     sku: '',
+    featured: false,
+    archived: false,
   });
+  const [productImages, setProductImages] = useState([]);
+
+  // All orders from top-level collection (admin view)
+  const [allOrders, setAllOrders] = useState(orders);
+
+  // Listen to top-level orders collection so admin sees ALL orders, not just own
+  useEffect(() => {
+    if (!isFirebaseActive) {
+      // Non-Firebase mode: read from the shared all-orders key
+      const loadShared = () => {
+        const stored = (() => { try { return JSON.parse(localStorage.getItem('saran-jute-all-orders') || '[]'); } catch { return []; } })();
+        stored.sort((a, b) => {
+          const ta = new Date(a.createdAt || a.date).getTime() || 0;
+          const tb = new Date(b.createdAt || b.date).getTime() || 0;
+          return tb - ta;
+        });
+        setAllOrders(stored.length > 0 ? stored : orders);
+      };
+      loadShared();
+      const interval = setInterval(loadShared, 3000);
+      window.addEventListener('storage', loadShared);
+      return () => { clearInterval(interval); window.removeEventListener('storage', loadShared); };
+    }
+    const unsub = onSnapshot(collection(db, 'orders'), (snap) => {
+      const docs = [];
+      snap.forEach(d => docs.push(d.data()));
+      docs.sort((a, b) => {
+        const ta = new Date(a.createdAt || a.date).getTime() || 0;
+        const tb = new Date(b.createdAt || b.date).getTime() || 0;
+        return tb - ta;
+      });
+      setAllOrders(docs);
+    }, () => {
+      setAllOrders(orders);
+    });
+    return () => unsub();
+  }, [orders]);
 
   // Order notifications
   const [newOrderPopup, setNewOrderPopup] = useState(false);
@@ -86,6 +133,10 @@ const AdminDashboard = () => {
   // Admin cancellation reason
   const [showCancelReasonModal, setShowCancelReasonModal] = useState(null);
   const [adminCancelReason, setAdminCancelReason] = useState('');
+  const [ordersPage, setOrdersPage] = useState(1);
+  const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(null); // {type: 'orders'|'product', ids: [], productId?: string} or null
+  const [alertSection, setAlertSection] = useState('banners');
 
   // Popups
   const [popups, setPopups] = useState([]);
@@ -136,6 +187,10 @@ const AdminDashboard = () => {
     surface: companySettings?.surfaceColor || '#ecfdf5',
   });
 
+  // Scrolling text form state
+  const [scrollingTextInput, setScrollingTextInput] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+
   // Category form state
   const emptyCategoryForm = { name: '', image: '', description: '', sortOrder: '', visible: true, featured: false };
   const [editingCategory, setEditingCategory] = useState(null);
@@ -148,10 +203,10 @@ const AdminDashboard = () => {
     { id: 'categories', label: 'Categories', icon: Tags },
     { id: 'products', label: 'Products', icon: Package },
     { id: 'orders', label: 'Orders', icon: ShoppingCart },
+    { id: 'reviews', label: 'Reviews', icon: Star },
     { id: 'customers', label: 'Customers', icon: Users },
-    { id: 'popups', label: 'Popups', icon: Bell },
-    { id: 'banners', label: 'Banners', icon: ImageIcon },
-    { id: 'coupons', label: 'Coupons', icon: Ticket },
+    { id: 'activity', label: 'Activity', icon: History },
+    { id: 'alerts', label: 'Alerts', icon: Bell },
     { id: 'theme', label: 'Theme', icon: Palette },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
@@ -186,7 +241,7 @@ const AdminDashboard = () => {
     const currentOrderStatuses = {};
     let newPendingCount = 0;
 
-    orders.forEach(order => {
+    allOrders.forEach(order => {
       currentOrderStatuses[order.id] = order.status;
       if (order.status === 'Pending' || order.status === 'Confirmed') {
         newPendingCount++;
@@ -194,7 +249,7 @@ const AdminDashboard = () => {
     });
 
     // Check for new orders (status became Pending/Confirmed)
-    orders.forEach(order => {
+    allOrders.forEach(order => {
       if (!previousOrderStatusesRef.current[order.id] && 
           (order.status === 'Pending' || order.status === 'Confirmed')) {
         setNewOrderCount(newPendingCount);
@@ -212,7 +267,7 @@ const AdminDashboard = () => {
 
     previousOrderStatusesRef.current = currentOrderStatuses;
     setNewOrderCount(newPendingCount);
-  }, [orders, processedCancelledOrders]);
+  }, [allOrders, processedCancelledOrders]);
 
   // New order sound loop
   useEffect(() => {
@@ -268,46 +323,58 @@ const AdminDashboard = () => {
         newImages.push(base64);
       }
       
-      setProductForm(prev => {
-        const existingImages = prev.images ? prev.images.split(',').map(img => img.trim()).filter(img => img) : [];
-        return {
-          ...prev,
-          images: [...existingImages, ...newImages].join(', ')
-        };
-      });
+      setProductImages(prev => [...prev, ...newImages]);
       showMessage(`${newImages.length} image(s) uploaded successfully`);
     } catch (error) {
+      console.error('Image upload error:', error);
       showMessage('Failed to upload image(s)', 'error');
     }
   };
 
   const handleSaveProduct = async () => {
+    if (!productForm.name.trim()) { showMessage('Product name is required', 'error'); return; }
+    if (!productForm.price) { showMessage('Product price is required', 'error'); return; }
+    if (!productForm.category) { showMessage('Please select a category', 'error'); return; }
     setLoading(true);
     try {
+      const urlImages = productForm.images ? productForm.images.split(',').map(img => img.trim()).filter(Boolean) : [];
+      const allImages = [...productImages, ...urlImages];
       const productData = {
         ...productForm,
         price: Number(productForm.price) || 0,
+        originalPrice: productForm.showDiscount ? (Number(productForm.originalPrice) || 0) : 0,
+        discount: productForm.showDiscount ? (Number(productForm.discount) || 0) : 0,
+        showDiscount: productForm.showDiscount,
         stock: Number(productForm.stock) || 0,
-        images: productForm.images.split(',').map(img => img.trim()),
+        images: allImages,
         visible: true,
-        featured: false,
+        featured: productForm.featured,
+        archived: productForm.archived,
         bestseller: false,
         newArrival: false,
-        createdAt: new Date().toISOString(),
+        createdAt: editingProduct?.createdAt || new Date().toISOString(),
       };
 
       if (editingProduct) {
         await updateProduct(editingProduct.id, productData);
+        addActivityLog(`Updated product ${productData.name}`, user?.email);
         showMessage('Product updated successfully');
       } else {
         await addProduct(productData);
+        addActivityLog(`Added product ${productData.name}`, user?.email);
         showMessage('Product added successfully');
       }
 
       setEditingProduct(null);
+      setProductImages([]);
       setProductForm({
         name: '',
         price: '',
+        originalPrice: '',
+        discount: '',
+        discountType: 'percentage',
+        showDiscount: false,
+        material: '',
         stock: '',
         category: '',
         description: '',
@@ -324,20 +391,29 @@ const AdminDashboard = () => {
 
   const handleEditProduct = (product) => {
     setEditingProduct(product);
+    const imgs = product.images || [];
+    const uploaded = imgs.filter(img => img.startsWith('data:'));
+    const urls = imgs.filter(img => !img.startsWith('data:'));
+    setProductImages(uploaded);
     setProductForm({
       name: product.name || '',
       price: product.price || '',
+      originalPrice: product.originalPrice || '',
+      discount: product.discount || '',
+      discountType: product.discountType || 'percentage',
+      showDiscount: product.showDiscount !== undefined ? product.showDiscount : Boolean(product.originalPrice),
+      material: product.material || '',
       stock: product.stock || '',
       category: product.category || '',
       description: product.description || '',
-      images: Array.isArray(product.images) ? product.images.join(', ') : product.images || '',
+      images: urls.join(','),
       sku: product.sku || '',
+      featured: product.featured || false,
+      archived: product.archived || false,
     });
   };
 
   const handleDeleteProduct = async (id) => {
-    if (!confirm('Are you sure you want to delete this product?')) return;
-    
     try {
       await deleteProduct(id);
       showMessage('Product deleted successfully');
@@ -348,29 +424,49 @@ const AdminDashboard = () => {
 
   const handleUpdateOrderStatus = async (orderId, status, cancelReason = '') => {
     try {
-      const order = orders.find(o => o.id === orderId);
+      const order = allOrders.find(o => o.id === orderId);
       const updateData = { status };
       if (status === 'Cancelled') {
         updateData.cancelReason = cancelReason;
         updateData.cancelledAt = new Date().toLocaleString();
       }
-      await updateOrder(orderId, updateData);
-      
-      if (order) {
-        const emailResult = await sendOrderStatusEmail(order, status);
-        if (emailResult.success) {
-          console.log('Email sent successfully');
-        } else {
-          console.error('Email failed:', emailResult.error);
-          showMessage(`Order updated but email failed: ${emailResult.error}`, 'warning');
-        }
-      }
-      
+      await updateOrder(orderId, updateData, order);
+      addActivityLog(`Updated order ${orderId} status to ${status}`, user?.email);
       showMessage(`Order status updated to ${status}`);
     } catch (error) {
       console.error('Order update error:', error);
       showMessage('Failed to update order status', 'error');
     }
+  };
+
+  const toggleSelectOrder = (orderId) => {
+    setSelectedOrderIds(prev => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId); else next.add(orderId);
+      return next;
+    });
+  };
+
+  const toggleSelectAllOrders = () => {
+    const ids = filteredOrders.map(o => o.id);
+    setSelectedOrderIds(prev => prev.size === ids.length ? new Set() : new Set(ids));
+  };
+
+  const confirmDeleteOrders = () => {
+    setShowDeleteConfirm({ type: 'orders', ids: [...selectedOrderIds] });
+  };
+
+  const handleDeleteOrders = async () => {
+    const ids = showDeleteConfirm?.ids || [];
+    if (ids.length === 0) return;
+    try {
+      deleteOrders(ids);
+      showMessage(`${ids.length} order(s) deleted successfully`);
+    } catch (error) {
+      showMessage('Failed to delete orders', 'error');
+    }
+    setShowDeleteConfirm(null);
+    setSelectedOrderIds(new Set());
   };
 
   // Popup handlers
@@ -447,6 +543,8 @@ const AdminDashboard = () => {
 
   // Coupon handlers
   const handleSaveCoupon = async () => {
+    if (!couponForm.code.trim()) { showMessage('Coupon code is required', 'error'); return; }
+    if (!couponForm.discount) { showMessage('Discount value is required', 'error'); return; }
     setLoading(true);
     try {
       const id = editingCoupon?.id || `coupon-${Date.now()}`;
@@ -459,6 +557,7 @@ const AdminDashboard = () => {
       };
       
       await setDoc(doc(db, 'coupons', id), couponData);
+      addActivityLog(editingCoupon ? `Updated coupon ${couponForm.code}` : `Added coupon ${couponForm.code}`, user?.email);
       showMessage(editingCoupon ? 'Coupon updated successfully' : 'Coupon added successfully');
       
       setEditingCoupon(null);
@@ -482,7 +581,9 @@ const AdminDashboard = () => {
   const handleDeleteCoupon = async (id) => {
     if (!confirm('Delete this coupon?')) return;
     try {
+      const coupon = coupons.find(c => c.id === id);
       await deleteDoc(doc(db, 'coupons', id));
+      addActivityLog(`Deleted coupon ${coupon?.code || id}`, user?.email);
       showMessage('Coupon deleted successfully');
     } catch (error) {
       showMessage('Failed to delete coupon', 'error');
@@ -637,21 +738,23 @@ const AdminDashboard = () => {
 
   const getOrderCounts = () => {
     const counts = {
-      total: orders.length,
+      total: allOrders.length,
       pending: 0,
       confirmed: 0,
       packed: 0,
       shipped: 0,
+      ontheway: 0,
       delivered: 0,
       cancelled: 0
     };
 
-    orders.forEach(order => {
+    allOrders.forEach(order => {
       const status = order.status?.toLowerCase() || 'pending';
       if (status === 'pending') counts.pending++;
       else if (status === 'confirmed') counts.confirmed++;
       else if (status === 'packed') counts.packed++;
       else if (status === 'shipped') counts.shipped++;
+      else if (status === 'on the way' || status === 'ontheway') counts.ontheway++;
       else if (status === 'delivered') counts.delivered++;
       else if (status === 'cancelled') counts.cancelled++;
     });
@@ -701,11 +804,13 @@ const AdminDashboard = () => {
   };
 
   const getFilteredOrders = () => {
-    let filtered = orders;
+    let filtered = allOrders;
     if (activeOrderFilter !== 'all') {
-      filtered = filtered.filter(order => 
-        order.status?.toLowerCase() === activeOrderFilter.toLowerCase()
-      );
+      filtered = filtered.filter(order => {
+        const s = order.status?.toLowerCase();
+        if (activeOrderFilter === 'shipped') return s === 'shipped' || s === 'on the way' || s === 'ontheway';
+        return s === activeOrderFilter.toLowerCase();
+      });
     }
     filtered = filterOrdersByDate(filtered, activeDateFilter, customDateFrom, customDateTo);
     return filtered;
@@ -717,7 +822,7 @@ const AdminDashboard = () => {
   const renderOverview = () => (
     <div className="space-y-6">
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 lg:gap-6">
         <StatCard 
           label="Total Orders" 
           value={orderCounts.total} 
@@ -746,7 +851,7 @@ const AdminDashboard = () => {
         />
         <StatCard 
           label="Shipped" 
-          value={orderCounts.shipped} 
+          value={orderCounts.shipped + orderCounts.ontheway} 
           icon={Truck} 
           color="bg-purple-500" 
         />
@@ -770,7 +875,7 @@ const AdminDashboard = () => {
         />
         <StatCard 
           label="Revenue" 
-          value={`₹${orders.filter(o => o.status === 'Delivered').reduce((sum, o) => sum + (o.total || o.grandTotal || 0), 0).toLocaleString()}`} 
+          value={`₹${allOrders.filter(o => o.status === 'Delivered').reduce((sum, o) => sum + (o.total || o.grandTotal || 0), 0).toLocaleString()}`} 
           icon={LayoutDashboard} 
           color="bg-pink-500" 
         />
@@ -779,20 +884,20 @@ const AdminDashboard = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card title="Recent Orders">
           <div className="space-y-3">
-            {orders.slice(0, 5).map(order => (
+            {allOrders.slice(0, 5).map(order => (
               <div key={order.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                 <div>
                   <p className="font-medium">{order.id}</p>
                   <p className="text-sm text-gray-500">{order.date}</p>
                 </div>
                 <span className={`px-3 py-1 rounded-full text-sm ${
-                  order.status === 'Delivered' ? 'bg-green-100 text-green-700' :
                   order.status === 'Cancelled' ? 'bg-red-100 text-red-700' :
-                  'bg-yellow-100 text-yellow-700'
+                  order.status === 'Delivered' ? 'bg-green-100 text-green-700' :
+                  'bg-orange-100 text-orange-700'
                 }`}>{order.status}</span>
               </div>
             ))}
-            {orders.length === 0 && <p className="text-gray-500 text-center py-4">No orders yet</p>}
+            {allOrders.length === 0 && <p className="text-gray-500 text-center py-4">No orders yet</p>}
           </div>
         </Card>
 
@@ -830,13 +935,77 @@ const AdminDashboard = () => {
             onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })}
             placeholder="Enter SKU"
           />
-          <Input
-            label="Price (₹)"
-            type="number"
-            value={productForm.price}
-            onChange={(e) => setProductForm({ ...productForm, price: e.target.value })}
-            placeholder="Enter price"
-          />
+          <div className="md:col-span-2 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setProductForm({ ...productForm, showDiscount: !productForm.showDiscount, originalPrice: '', discount: '' })}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                productForm.showDiscount
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {productForm.showDiscount ? 'Discount Enabled' : 'Enable Discount'}
+            </button>
+            <span className="text-xs text-gray-400">
+              {productForm.showDiscount ? 'Enter actual price & discount % — offer price auto-calculated' : 'Enter the final selling price directly'}
+            </span>
+          </div>
+          {productForm.showDiscount ? (
+            <>
+              <Input
+                label="Actual Price / MRP (₹)"
+                type="number"
+                value={productForm.originalPrice}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const disc = val && productForm.price ? Math.round(((Number(val) - Number(productForm.price)) / Number(val)) * 100) : '';
+                  setProductForm({ ...productForm, originalPrice: val, discount: disc });
+                }}
+                placeholder="Enter MRP / actual price"
+              />
+              <div className="space-y-1">
+                <label className="block text-sm font-medium text-gray-700">Discount %</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={productForm.discount}
+                    onChange={(e) => {
+                      const disc = e.target.value;
+                      const offerPrice = disc && productForm.originalPrice
+                        ? Math.round(Number(productForm.originalPrice) * (1 - Number(disc) / 100))
+                        : '';
+                      setProductForm({ ...productForm, discount: disc, price: offerPrice });
+                    }}
+                    placeholder="Discount %"
+                    className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-500">%</span>
+                </div>
+              </div>
+              <Input
+                label="Offer Price (₹) — Auto Calculated"
+                type="number"
+                value={productForm.price}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const disc = productForm.originalPrice && val
+                    ? Math.round(((Number(productForm.originalPrice) - Number(val)) / Number(productForm.originalPrice)) * 100)
+                    : '';
+                  setProductForm({ ...productForm, price: val, discount: disc });
+                }}
+                placeholder="Calculated automatically"
+              />
+            </>
+          ) : (
+            <Input
+              label="Final Price (₹)"
+              type="number"
+              value={productForm.price}
+              onChange={(e) => setProductForm({ ...productForm, price: e.target.value })}
+              placeholder="Enter final selling price"
+            />
+          )}
           <Input
             label="Stock"
             type="number"
@@ -844,6 +1013,39 @@ const AdminDashboard = () => {
             onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })}
             placeholder="Enter stock quantity"
           />
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Material Type</label>
+            <select
+              value={productForm.material}
+              onChange={(e) => setProductForm({ ...productForm, material: e.target.value })}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">— Select material —</option>
+              <option value="Jute">Jute</option>
+              <option value="Cotton">Cotton</option>
+              <option value="Canvas">Canvas</option>
+            </select>
+          </div>
+          <div className="flex gap-6 mt-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={productForm.featured}
+                onChange={(e) => setProductForm({ ...productForm, featured: e.target.checked })}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium text-gray-700">Featured</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={productForm.archived}
+                onChange={(e) => setProductForm({ ...productForm, archived: e.target.checked })}
+                className="w-4 h-4 text-gray-600 border-gray-300 rounded focus:ring-gray-500"
+              />
+              <span className="text-sm font-medium text-gray-700">Archived</span>
+            </label>
+          </div>
           <div className="space-y-1">
             <label className="block text-sm font-medium text-gray-700">Category</label>
             <select
@@ -862,11 +1064,31 @@ const AdminDashboard = () => {
           </div>
           <div className="space-y-2">
             <label className="block text-sm font-medium text-gray-700">Images</label>
+            {(productImages.length > 0 || productForm.images) && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {productImages.map((img, i) => (
+                  <div key={`up-${i}`} className="relative group">
+                    <img src={img} alt={`Uploaded ${i + 1}`} className="w-20 h-20 object-cover rounded-lg border border-gray-200" onError={(e) => { e.target.style.display = 'none'; }} />
+                    <button onClick={() => setProductImages(prev => prev.filter((_, j) => j !== i))} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 shadow opacity-0 group-hover:opacity-100 transition"><X className="w-3 h-3" /></button>
+                  </div>
+                ))}
+                {productForm.images && productForm.images.split(',').filter(Boolean).map((url, i) => (
+                  <div key={`url-${i}`} className="relative group">
+                    <img src={url.trim()} alt={`URL ${i + 1}`} className="w-20 h-20 object-cover rounded-lg border border-gray-200" onError={(e) => { e.target.style.display = 'none'; }} />
+                    <button onClick={() => {
+                      const urls = productForm.images.split(',').filter(Boolean);
+                      urls.splice(i, 1);
+                      setProductForm({ ...productForm, images: urls.join(',') });
+                    }} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 shadow opacity-0 group-hover:opacity-100 transition"><X className="w-3 h-3" /></button>
+                  </div>
+                ))}
+              </div>
+            )}
             <textarea
               value={productForm.images}
               onChange={(e) => setProductForm({ ...productForm, images: e.target.value })}
-              placeholder="Image URLs (comma separated)"
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="Image URLs (comma separated) or upload below"
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-xs"
               rows={2}
             />
             <div className="flex items-center gap-2">
@@ -920,10 +1142,10 @@ const AdminDashboard = () => {
       </Card>
 
       <Card title="Product List">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b">
                 <th className="text-left p-3">Product</th>
                 <th className="text-left p-3">SKU</th>
                 <th className="text-left p-3">Price</th>
@@ -938,9 +1160,11 @@ const AdminDashboard = () => {
                   <td className="p-3">
                     <div className="flex items-center gap-3">
                       {product.images?.[0] && (
-                        <img src={product.images[0]} alt={product.name} className="w-12 h-12 object-cover rounded" />
+                        <img src={product.images[0]} alt={product.name} className="w-12 h-12 object-cover rounded" onError={(e) => { e.target.style.display = 'none'; }} />
                       )}
                       <span className="font-medium">{product.name}</span>
+                      {product.featured && <span className="text-[10px] px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded-full font-semibold">Featured</span>}
+                      {product.archived && <span className="text-[10px] px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded-full font-semibold">Archived</span>}
                     </div>
                   </td>
                   <td className="p-3">{product.sku}</td>
@@ -958,7 +1182,7 @@ const AdminDashboard = () => {
                         <Edit className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleDeleteProduct(product.id)}
+                        onClick={() => setShowDeleteConfirm({ type: 'product', productId: product.id })}
                         className="p-2 text-red-600 hover:bg-red-50 rounded"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -1186,156 +1410,244 @@ const AdminDashboard = () => {
     );
   };
 
-  const renderOrders = () => (
-    <div className="space-y-6">
-      {/* Order filters */}
-      <Card title="Orders">
-        <div className="flex flex-wrap gap-2 mb-4">
-          {['all', 'pending', 'confirmed', 'packed', 'shipped', 'delivered', 'cancelled'].map(filter => (
-            <button
-              key={filter}
-              onClick={() => setActiveOrderFilter(filter)}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                activeOrderFilter === filter
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              {filter.charAt(0).toUpperCase() + filter.slice(1)}
-              {filter !== 'all' && (
-                <span className="ml-2 px-2 py-0.5 bg-white/20 rounded-full text-xs">
-                  {orderCounts[filter]}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-        {/* Date filters */}
-        <div className="flex flex-wrap gap-2 mb-4">
-          {['all', 'today', 'this-week', 'this-month', 'this-year', 'custom'].map(filter => (
-            <button
-              key={filter}
-              onClick={() => setActiveDateFilter(filter)}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                activeDateFilter === filter
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              {filter === 'all' ? 'All Time' : 
-               filter === 'today' ? 'Today' : 
-               filter === 'this-week' ? 'This Week' :
-               filter === 'this-month' ? 'This Month' :
-               filter === 'this-year' ? 'This Year' : 'Custom Range'}
-            </button>
-          ))}
-        </div>
-        {activeDateFilter === 'custom' && (
-          <div className="flex flex-wrap items-center gap-3 mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-700">From:</label>
-              <input
-                type="date"
-                value={customDateFrom}
-                onChange={e => setCustomDateFrom(e.target.value)}
-                className="p-2 border border-gray-300 rounded-lg text-sm"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-700">To:</label>
-              <input
-                type="date"
-                value={customDateTo}
-                onChange={e => setCustomDateTo(e.target.value)}
-                className="p-2 border border-gray-300 rounded-lg text-sm"
-              />
-            </div>
-            {(customDateFrom || customDateTo) && (
+  const renderOrders = () => {
+    const perPage = 30;
+    const totalPages = Math.ceil(filteredOrders.length / perPage) || 1;
+    const safePage = Math.min(ordersPage, totalPages);
+    const paginatedOrders = filteredOrders.slice((safePage - 1) * perPage, safePage * perPage);
+
+    return (
+      <div className="space-y-6">
+        <Card title="Orders">
+          <div className="flex flex-wrap gap-2 mb-4">
+            {[
+              { key: 'all', label: 'All' },
+              { key: 'today', label: 'Today' },
+            ].map(filter => (
               <button
-                onClick={() => { setCustomDateFrom(''); setCustomDateTo(''); }}
-                className="px-3 py-2 text-sm text-gray-600 hover:text-red-600 bg-white border border-gray-200 rounded-lg"
+                key={filter.key}
+                onClick={() => {
+                  setActiveOrderFilter('all');
+                  setActiveDateFilter(filter.key === 'today' ? 'today' : 'all');
+                  setOrdersPage(1);
+                }}
+                className={`px-5 py-2.5 rounded-xl font-bold transition-all text-sm ${
+                  (filter.key === 'all' && activeOrderFilter === 'all' && (activeDateFilter === 'all' || activeDateFilter === '')) ||
+                  (filter.key === 'today' && activeDateFilter === 'today')
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {filter.label}
+                {filter.key === 'all' && <span className="ml-2 px-2 py-0.5 bg-white/20 rounded-full text-xs">{allOrders.length}</span>}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap gap-2 mb-4">
+            {[
+              { key: 'pending', label: 'Pending', count: orderCounts.pending },
+              { key: 'confirmed', label: 'Confirmed', count: orderCounts.confirmed },
+              { key: 'packed', label: 'Packed', count: orderCounts.packed },
+              { key: 'shipped', label: 'Shipped', count: orderCounts.shipped + orderCounts.ontheway },
+              { key: 'delivered', label: 'Delivered', count: orderCounts.delivered },
+              { key: 'cancelled', label: 'Cancelled', count: orderCounts.cancelled },
+            ].map(statusFilter => (
+              <button
+                key={statusFilter.key}
+                onClick={() => { setActiveOrderFilter(statusFilter.key); setActiveDateFilter('all'); setOrdersPage(1); }}
+                className={`px-4 py-2 rounded-lg font-medium transition-all text-sm ${
+                  activeOrderFilter === statusFilter.key && activeDateFilter === 'all'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {statusFilter.label}
+                <span className="ml-1.5 px-1.5 py-0.5 bg-white/20 rounded-full text-xs">{statusFilter.count}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap gap-2 mb-4">
+            {['today', 'this-week', 'this-month', 'this-year', 'all', 'custom'].map(filter => (
+              <button
+                key={filter}
+                onClick={() => { setActiveDateFilter(filter); setOrdersPage(1); }}
+                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                  activeDateFilter === filter
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {filter === 'all' ? 'All Time' : 
+                 filter === 'today' ? 'Today' : 
+                 filter === 'this-week' ? 'This Week' :
+                 filter === 'this-month' ? 'This Month' :
+                 filter === 'this-year' ? 'This Year' : 'Custom'}
+              </button>
+            ))}
+          </div>
+          {activeDateFilter === 'custom' && (
+            <div className="flex flex-wrap items-center gap-3 mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-gray-700">From:</label>
+                <input
+                  type="date"
+                  value={customDateFrom}
+                  onChange={e => setCustomDateFrom(e.target.value)}
+                  className="p-2 border border-gray-300 rounded-lg text-sm"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-gray-700">To:</label>
+                <input
+                  type="date"
+                  value={customDateTo}
+                  onChange={e => setCustomDateTo(e.target.value)}
+                  className="p-2 border border-gray-300 rounded-lg text-sm"
+                />
+              </div>
+              {(customDateFrom || customDateTo) && (
+                <button
+                  onClick={() => { setCustomDateFrom(''); setCustomDateTo(''); }}
+                  className="px-3 py-2 text-sm text-gray-600 hover:text-red-600 bg-white border border-gray-200 rounded-lg"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
+
+          {selectedOrderIds.size > 0 && (
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-sm text-gray-600">{selectedOrderIds.size} selected</span>
+              <button
+                onClick={confirmDeleteOrders}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
+              >
+                Delete Selected
+              </button>
+              <button
+                onClick={() => setSelectedOrderIds(new Set())}
+                className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200"
               >
                 Clear
               </button>
-            )}
-          </div>
-        )}
+            </div>
+          )}
 
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b">
-                <th className="text-left p-3">Order ID</th>
-                <th className="text-left p-3">Date</th>
-                <th className="text-left p-3">Customer</th>
-                <th className="text-left p-3">Total</th>
-                <th className="text-left p-3">Status</th>
-                <th className="text-left p-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredOrders.map(order => (
-                <tr key={order.id} className="border-b hover:bg-gray-50">
-                  <td className="p-3 font-medium">{order.id}</td>
-                  <td className="p-3">{order.date}</td>
-                  <td className="p-3">{order.shippingAddress?.name || 'N/A'}</td>
-                  <td className="p-3">₹{order.total || order.grandTotal || 0}</td>
-                  <td className="p-3">
-                    <div className="space-y-1">
-                      <span className={`px-3 py-1 rounded-full text-sm ${
-                        order.status === 'Delivered' ? 'bg-green-100 text-green-700' :
-                        order.status === 'Cancelled' ? 'bg-red-100 text-red-700' :
-                        'bg-yellow-100 text-yellow-700'
-                      }`}>{order.status}</span>
-                      {order.status === 'Cancelled' && order.cancelReason && (
-                        <p className="text-xs text-gray-500">Reason: {order.cancelReason}</p>
-                      )}
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => setSelectedOrder(order)}
-                        className="p-2 text-blue-600 hover:bg-blue-50 rounded"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <select
-                        value={order.status}
-                        onChange={(e) => {
-                          if (e.target.value === 'Cancelled') {
-                            setShowCancelReasonModal(order.id);
-                            setAdminCancelReason('');
-                          } else {
-                            handleUpdateOrderStatus(order.id, e.target.value);
-                          }
-                        }}
-                        className="p-2 border rounded-lg"
-                      >
-                        <option value="Pending">Pending</option>
-                        <option value="Confirmed">Confirmed</option>
-                        <option value="Packed">Packed</option>
-                        <option value="Shipped">Shipped</option>
-                        <option value="Delivered">Delivered</option>
-                        <option value="Cancelled">Cancelled</option>
-                      </select>
-                    </div>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b">
+                  <th className="p-3 w-10">
+                    <input
+                      type="checkbox"
+                      checked={filteredOrders.length > 0 && selectedOrderIds.size === filteredOrders.length}
+                      onChange={toggleSelectAllOrders}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                  </th>
+                  <th className="text-left p-3">Order ID</th>
+                  <th className="text-left p-3">Date</th>
+                  <th className="text-left p-3">Customer</th>
+                  <th className="text-left p-3">Total</th>
+                  <th className="text-left p-3">Status</th>
+                  <th className="text-left p-3">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {filteredOrders.length === 0 && <p className="text-gray-500 text-center py-8">No orders found</p>}
-        </div>
-      </Card>
-    </div>
-  );
+              </thead>
+              <tbody>
+                {paginatedOrders.map(order => (
+                  <tr key={order.id} className={`border-b hover:bg-gray-50 ${selectedOrderIds.has(order.id) ? 'bg-blue-50' : ''}`}>
+                    <td className="p-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedOrderIds.has(order.id)}
+                        onChange={() => toggleSelectOrder(order.id)}
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                    </td>
+                    <td className="p-3 font-medium">{order.id}</td>
+                    <td className="p-3">{order.date}</td>
+                    <td className="p-3">{order.shippingAddress?.name || 'N/A'}</td>
+                    <td className="p-3">₹{order.total || order.grandTotal || 0}</td>
+                    <td className="p-3">
+                      <div className="space-y-1">
+                        <span className={`px-3 py-1 rounded-full text-sm ${
+                          order.status === 'Cancelled' ? 'bg-red-100 text-red-700' :
+                          order.status === 'Delivered' ? 'bg-green-100 text-green-700' :
+                          'bg-orange-100 text-orange-700'
+                        }`}>{order.status}</span>
+                        {order.status === 'Cancelled' && order.cancelReason && (
+                          <p className="text-xs text-gray-500">Reason: {order.cancelReason}</p>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-3">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => setSelectedOrder(order)}
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        <select
+                          value={order.status}
+                          onChange={(e) => {
+                            if (e.target.value === 'Cancelled') {
+                              setShowCancelReasonModal(order.id);
+                              setAdminCancelReason('');
+                            } else {
+                              handleUpdateOrderStatus(order.id, e.target.value);
+                            }
+                          }}
+                          className="p-2 border rounded-lg"
+                        >
+                          <option value="Pending">Pending</option>
+                          <option value="Confirmed">Confirmed</option>
+                          <option value="Packed">Packed</option>
+                          <option value="Shipped">Shipped</option>
+                          <option value="On the Way">On the Way</option>
+                          <option value="Delivered">Delivered</option>
+                          <option value="Cancelled">Cancelled</option>
+                        </select>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {filteredOrders.length === 0 && <p className="text-gray-500 text-center py-8">No orders found</p>}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4 pt-4 border-t">
+              <p className="text-sm text-gray-500">Showing {(safePage - 1) * perPage + 1}-{Math.min(safePage * perPage, filteredOrders.length)} of {filteredOrders.length}</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setOrdersPage(p => Math.max(1, p - 1))}
+                  disabled={safePage <= 1}
+                  className="px-3 py-1.5 rounded border text-sm disabled:opacity-40"
+                >Previous</button>
+                <span className="px-3 py-1.5 text-sm font-medium">{safePage} / {totalPages}</span>
+                <button
+                  onClick={() => setOrdersPage(p => Math.min(totalPages, p + 1))}
+                  disabled={safePage >= totalPages}
+                  className="px-3 py-1.5 rounded border text-sm disabled:opacity-40"
+                >Next</button>
+              </div>
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
 
   const renderAnalytics = () => {
     const now = new Date();
 
     const getStats = (filter, from, to) => {
-      const filtered = filterOrdersByDate(orders, filter, from, to);
+      const filtered = filterOrdersByDate(allOrders, filter, from, to);
       const delivered = filtered.filter(o => o.status === 'Delivered');
       const cancelled = filtered.filter(o => o.status === 'Cancelled');
       const revenue = delivered.reduce((sum, o) => sum + (o.total || o.grandTotal || 0), 0);
@@ -1363,12 +1675,14 @@ const AdminDashboard = () => {
               value={todayStats.orders} 
               icon={ShoppingCart} 
               color="bg-blue-500" 
+              isNew={todayStats.orders > 0}
             />
             <StatCard 
               label="Today's Revenue" 
               value={`₹${todayStats.revenue.toLocaleString()}`} 
               icon={LayoutDashboard} 
               color="bg-green-500" 
+              isNew={todayStats.revenue > 0}
             />
             <StatCard 
               label="This Month Orders" 
@@ -1511,561 +1825,782 @@ const AdminDashboard = () => {
     );
   };
 
-  const renderCustomers = () => (
-    <Card title="Customers">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {orders.map((order, index) => (
-          <div key={`${order.shippingAddress?.phone}-${index}`} className="p-4 bg-gray-50 rounded-lg">
-            <p className="font-medium">{order.shippingAddress?.name || 'Customer'}</p>
-            <p className="text-sm text-gray-500">{order.shippingAddress?.phone || 'N/A'}</p>
-            <p className="text-sm text-gray-500 mt-2">{order.shippingAddress?.addressLine1 || 'No address'}</p>
-          </div>
-        ))}
-        {orders.length === 0 && <p className="text-gray-500 text-center py-8">No customers yet</p>}
+  const [customersPage, setCustomersPage] = useState(1);
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const customersPerPage = 30;
+
+  const getUniqueCustomers = () => {
+    const seen = new Set();
+    return allOrders.filter(order => {
+      const phone = order.shippingAddress?.phone || order.userEmail || order.email;
+      if (!phone || seen.has(phone)) return false;
+      seen.add(phone);
+      return true;
+    });
+  };
+
+  const exportCustomersCSV = () => {
+    const unique = getUniqueCustomers();
+    const headers = ['Name', 'Phone', 'Email', 'Address', 'City', 'State', 'Pincode', 'Total Orders', 'Total Spent', 'Last Order Date'];
+    const rows = unique.map(c => {
+      const customerOrders = allOrders.filter(o =>
+        (o.shippingAddress?.phone && o.shippingAddress.phone === c.shippingAddress?.phone) ||
+        (o.userEmail && o.userEmail === c.userEmail)
+      );
+      const totalSpent = customerOrders.reduce((sum, o) => sum + (o.grandTotal || o.total || 0), 0);
+      const lastDate = customerOrders.sort((a, b) => { const ta = new Date(a.createdAt || a.date).getTime() || 0; const tb = new Date(b.createdAt || b.date).getTime() || 0; return tb - ta; })[0]?.date || '';
+      return [
+        c.shippingAddress?.name || 'N/A',
+        c.shippingAddress?.phone || 'N/A',
+        c.userEmail || c.shippingAddress?.email || 'N/A',
+        (c.shippingAddress?.addressLine1 || '') + ' ' + (c.shippingAddress?.addressLine2 || ''),
+        c.shippingAddress?.city || '',
+        c.shippingAddress?.state || '',
+        c.shippingAddress?.pincode || '',
+        customerOrders.length,
+        totalSpent.toFixed(2),
+        lastDate
+      ];
+    });
+
+    const csvContent = [headers, ...rows].map(row =>
+      row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
+    ).join('\n');
+
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `customers-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const renderCustomers = () => {
+    const uniqueCustomers = getUniqueCustomers();
+    const totalPages = Math.max(1, Math.ceil(uniqueCustomers.length / customersPerPage));
+    const safePage = Math.min(customersPage, totalPages);
+    const paginated = uniqueCustomers.slice((safePage - 1) * customersPerPage, safePage * customersPerPage);
+
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl font-bold text-gray-800">Customers ({uniqueCustomers.length})</h2>
+          <button onClick={exportCustomersCSV} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium">
+            <Download className="w-4 h-4" /> Export CSV
+          </button>
+        </div>
+        <Card>
+          {uniqueCustomers.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">No customers yet</p>
+          ) : (
+            <>
+          <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-gray-50">
+                      <th className="text-left p-2.5 font-semibold text-gray-700">#</th>
+                      <th className="text-left p-2.5 font-semibold text-gray-700">Name</th>
+                      <th className="text-left p-2.5 font-semibold text-gray-700">Phone</th>
+                      <th className="text-left p-2.5 font-semibold text-gray-700">Email</th>
+                      <th className="text-left p-2.5 font-semibold text-gray-700">Address</th>
+                      <th className="text-left p-2.5 font-semibold text-gray-700">City</th>
+                      <th className="text-left p-2.5 font-semibold text-gray-700">Orders</th>
+                      <th className="text-left p-2.5 font-semibold text-gray-700">Total Spent</th>
+                      <th className="text-left p-2.5 font-semibold text-gray-700">Last Order</th>
+                      <th className="text-center p-2.5 font-semibold text-gray-700">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginated.map((c, idx) => {
+                      const customerOrders = allOrders.filter(o =>
+                        (o.shippingAddress?.phone && o.shippingAddress.phone === c.shippingAddress?.phone) ||
+                        (o.userEmail && o.userEmail === c.userEmail)
+                      );
+                      const totalSpent = customerOrders.reduce((sum, o) => sum + (o.grandTotal || o.total || 0), 0);
+                      return (
+                        <tr key={c.shippingAddress?.phone || c.userEmail || c.email || `cust-${idx}`} className="border-b hover:bg-gray-50">
+                          <td className="p-2.5 text-gray-500">{(safePage - 1) * customersPerPage + idx + 1}</td>
+                          <td className="p-2.5 font-medium">{c.shippingAddress?.name || 'N/A'}</td>
+                          <td className="p-2.5">{c.shippingAddress?.phone || 'N/A'}</td>
+                          <td className="p-2.5">{c.userEmail || c.shippingAddress?.email || 'N/A'}</td>
+                          <td className="p-2.5 max-w-[150px] truncate">{(c.shippingAddress?.addressLine1 || '') + ' ' + (c.shippingAddress?.addressLine2 || '')}</td>
+                          <td className="p-2.5">{c.shippingAddress?.city || ''}</td>
+                          <td className="p-2.5 font-medium">{customerOrders.length}</td>
+                          <td className="p-2.5 font-medium text-emerald-600">₹{totalSpent.toFixed(2)}</td>
+                          <td className="p-2.5 text-gray-500 text-xs">{customerOrders.sort((a, b) => { const ta = new Date(a.createdAt || a.date).getTime() || 0; const tb = new Date(b.createdAt || b.date).getTime() || 0; return tb - ta; })[0]?.date || ''}</td>
+                          <td className="p-2.5 text-center">
+                            <button onClick={() => setSelectedCustomer({ customer: c, orders: customerOrders })} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="View Details"><Eye className="w-4 h-4" /></button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between pt-4 border-t mt-4">
+                <p className="text-sm text-gray-500">Page {safePage} of {totalPages}</p>
+                <div className="flex gap-2">
+                  <button disabled={safePage <= 1} onClick={() => setCustomersPage(safePage - 1)} className="px-3 py-1.5 border rounded-lg text-sm disabled:opacity-40 hover:bg-gray-50">Previous</button>
+                  <button disabled={safePage >= totalPages} onClick={() => setCustomersPage(safePage + 1)} className="px-3 py-1.5 border rounded-lg text-sm disabled:opacity-40 hover:bg-gray-50">Next</button>
+                </div>
+              </div>
+            </>
+          )}
+        </Card>
       </div>
-    </Card>
-  );
+    );
+  };
+
+  const [reviewFilterProduct, setReviewFilterProduct] = useState('all');
+  const [reviewFilterStatus, setReviewFilterStatus] = useState('all');
+
+  const getAllProductReviews = () => {
+    const all = [];
+    products.forEach(product => {
+      (product.customerReviews || []).forEach(review => {
+        all.push({ ...review, productId: product.id, productName: product.name });
+      });
+    });
+    return all;
+  };
+
+  const getFilteredProductReviews = () => {
+    let all = getAllProductReviews();
+    if (reviewFilterProduct !== 'all') {
+      all = all.filter(r => String(r.productId) === reviewFilterProduct);
+    }
+    if (reviewFilterStatus === 'visible') {
+      all = all.filter(r => !r.hidden);
+    } else if (reviewFilterStatus === 'hidden') {
+      all = all.filter(r => r.hidden);
+    }
+    all.sort((a, b) => (b.id || 0) - (a.id || 0));
+    return all;
+  };
+
+  const renderReviews = () => {
+    const filteredReviews = getFilteredProductReviews();
+    const allReviews = getAllProductReviews();
+    const hiddenCount = allReviews.filter(r => r.hidden).length;
+    const visibleCount = allReviews.length - hiddenCount;
+
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <StatCard label="Total Reviews" value={allReviews.length} icon={Star} color="bg-emerald-500" />
+          <StatCard label="Visible" value={visibleCount} icon={Eye} color="bg-green-500" />
+          <StatCard label="Hidden" value={hiddenCount} icon={Eye} color="bg-gray-500" />
+        </div>
+
+        <Card title="Review Management">
+          <div className="flex flex-wrap gap-3 mb-4">
+            <select
+              value={reviewFilterProduct}
+              onChange={e => setReviewFilterProduct(e.target.value)}
+              className="p-2.5 border border-gray-300 rounded-lg text-sm bg-white"
+            >
+              <option value="all">All Products</option>
+              {products.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            <select
+              value={reviewFilterStatus}
+              onChange={e => setReviewFilterStatus(e.target.value)}
+              className="p-2.5 border border-gray-300 rounded-lg text-sm bg-white"
+            >
+              <option value="all">All Status</option>
+              <option value="visible">Visible</option>
+              <option value="hidden">Hidden</option>
+            </select>
+          </div>
+
+          {filteredReviews.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">No reviews found</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left p-3">Product</th>
+                    <th className="text-left p-3">Customer</th>
+                    <th className="text-left p-3">Rating</th>
+                    <th className="text-left p-3">Review</th>
+                    <th className="text-left p-3">Image</th>
+                    <th className="text-left p-3">Date</th>
+                    <th className="text-left p-3">Status</th>
+                    <th className="text-left p-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredReviews.map(review => (
+                    <tr key={review.id} className="border-b hover:bg-gray-50">
+                      <td className="p-3 text-sm font-medium">{review.productName}</td>
+                      <td className="p-3 text-sm">{review.name}</td>
+                      <td className="p-3">
+                        <div className="flex text-yellow-400">
+                          {[1, 2, 3, 4, 5].map(star => (
+                            <Star key={star} className={`w-3.5 h-3.5 ${star <= review.rating ? 'fill-current' : ''}`} />
+                          ))}
+                        </div>
+                      </td>
+                      <td className="p-3 text-sm max-w-[200px] truncate">{review.text}</td>
+                      <td className="p-3">
+                        {review.images && review.images.length > 0 ? (
+                          <img src={review.images[0]} alt="Review" className="w-10 h-10 object-cover rounded" onError={(e) => { e.target.style.display = 'none'; }} />
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-sm text-gray-500">{review.date}</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${review.hidden ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-700'}`}>
+                          {review.hidden ? 'Hidden' : 'Visible'}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => toggleReviewVisibility(review.productId, review.id)}
+                            className="p-1.5 text-gray-600 hover:bg-gray-100 rounded"
+                            title={review.hidden ? 'Show' : 'Hide'}
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (confirm('Delete this review?')) {
+                                deleteProductReview(review.productId, review.id);
+                              }
+                            }}
+                            className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  };
+
+  const handleChangePassword = async () => {
+    if (!newPassword.trim() || newPassword.length < 6) {
+      setMessage('Password must be at least 6 characters');
+      return;
+    }
+    setLoading(true);
+    try {
+      const auth = getAuth();
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        await updatePassword(currentUser, newPassword);
+        setMessage('Password changed successfully!');
+        setNewPassword('');
+      } else {
+        setMessage('You must be logged in to change password');
+      }
+    } catch (error) {
+      setMessage(error.message || 'Failed to update password');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const renderSettings = () => (
-    <Card title="Company Settings">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Input
-          label="Company Name"
-          value={companySettings.companyName || ''}
-          onChange={(e) => updateCompanySettings({ companyName: e.target.value })}
-        />
-        <Input
-          label="Phone"
-          value={companySettings.phone || ''}
-          onChange={(e) => updateCompanySettings({ phone: e.target.value })}
-        />
-        <Input
-          label="Email"
-          value={companySettings.email || ''}
-          onChange={(e) => updateCompanySettings({ email: e.target.value })}
-        />
-        <Input
-          label="GSTIN"
-          value={companySettings.gstin || ''}
-          onChange={(e) => updateCompanySettings({ gstin: e.target.value })}
-        />
-        <Input
-          label="Address"
-          value={companySettings.addressLine1 || ''}
-          onChange={(e) => updateCompanySettings({ addressLine1: e.target.value })}
-        />
-        <Input
-          label="City, State, PIN"
-          value={companySettings.cityStatePin || ''}
-          onChange={(e) => updateCompanySettings({ cityStatePin: e.target.value })}
-        />
-      </div>
-      <button
-        onClick={handleSaveSettings}
-        disabled={loading}
-        className="mt-6 flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-      >
-        <Save className="w-4 h-4" />
-        {loading ? 'Saving...' : 'Save Settings'}
-      </button>
-    </Card>
-  );
-
-  const renderPopups = () => (
     <div className="space-y-6">
-      <Card title={editingPopup ? 'Edit Popup' : 'Add New Popup'}>
+      <Card title="Company Settings">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Input
-            label="Title"
-            value={popupForm.title}
-            onChange={(e) => setPopupForm({ ...popupForm, title: e.target.value })}
+            label="Company Name"
+            value={companySettings.companyName || ''}
+            onChange={(e) => updateCompanySettings({ companyName: e.target.value })}
           />
           <Input
-            label="Subtitle"
-            value={popupForm.subtitle}
-            onChange={(e) => setPopupForm({ ...popupForm, subtitle: e.target.value })}
+            label="Phone"
+            value={companySettings.phone || ''}
+            onChange={(e) => updateCompanySettings({ phone: e.target.value })}
           />
           <Input
-            label="Button Text"
-            value={popupForm.buttonText}
-            onChange={(e) => setPopupForm({ ...popupForm, buttonText: e.target.value })}
+            label="Email"
+            value={companySettings.email || ''}
+            onChange={(e) => updateCompanySettings({ email: e.target.value })}
           />
           <Input
-            label="Button Link"
-            value={popupForm.buttonLink}
-            onChange={(e) => setPopupForm({ ...popupForm, buttonLink: e.target.value })}
+            label="GSTIN"
+            value={companySettings.gstin || ''}
+            onChange={(e) => updateCompanySettings({ gstin: e.target.value })}
           />
           <Input
-            label="Coupon Code"
-            value={popupForm.couponCode}
-            onChange={(e) => setPopupForm({ ...popupForm, couponCode: e.target.value })}
+            label="Address"
+            value={companySettings.addressLine1 || ''}
+            onChange={(e) => updateCompanySettings({ addressLine1: e.target.value })}
           />
           <Input
-            label="Priority"
-            type="number"
-            value={popupForm.priority}
-            onChange={(e) => setPopupForm({ ...popupForm, priority: Number(e.target.value) })}
+            label="City, State, PIN"
+            value={companySettings.cityStatePin || ''}
+            onChange={(e) => updateCompanySettings({ cityStatePin: e.target.value })}
           />
         </div>
-        <div className="mt-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
-          <textarea
-            value={popupForm.description}
-            onChange={(e) => setPopupForm({ ...popupForm, description: e.target.value })}
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            rows={3}
+        <button
+          onClick={handleSaveSettings}
+          disabled={loading}
+          className="mt-6 flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+        >
+          <Save className="w-4 h-4" />
+          {loading ? 'Saving...' : 'Save Settings'}
+        </button>
+      </Card>
+
+      <Card title="Change Password">
+        <div className="space-y-4">
+          <Input
+            label="New Password"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="Enter new password (min 6 characters)"
           />
-        </div>
-        <div className="mt-4 space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Image</label>
-          <textarea
-            value={popupForm.image}
-            onChange={(e) => setPopupForm({ ...popupForm, image: e.target.value })}
-            placeholder="Image URL"
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            rows={2}
-          />
-          <div className="flex items-center gap-2">
-            <input
-              type="file"
-              accept="image/*"
-              onChange={async (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                  const base64 = await convertFileToBase64(file);
-                  setPopupForm({ ...popupForm, image: base64 });
-                }
-              }}
-              className="hidden"
-              id="popupImageUpload"
-            />
-            <label htmlFor="popupImageUpload" className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer">
-              <Upload className="w-4 h-4" />
-              Upload Image
-            </label>
-          </div>
-        </div>
-        <div className="mt-4 flex gap-3">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={popupForm.active}
-              onChange={(e) => setPopupForm({ ...popupForm, active: e.target.checked })}
-            />
-            Active
-          </label>
-        </div>
-        <div className="mt-4 flex gap-3">
           <button
-            onClick={handleSavePopup}
+            onClick={handleChangePassword}
             disabled={loading}
-            className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            className="btn-primary px-5 py-2.5"
           >
-            <Save className="w-4 h-4" />
-            {loading ? 'Saving...' : editingPopup ? 'Update Popup' : 'Add Popup'}
+            {loading ? 'Updating...' : 'Update Password'}
           </button>
-          {editingPopup && (
-            <button
-              onClick={() => {
-                setEditingPopup(null);
-                setPopupForm({ title: '', subtitle: '', description: '', image: '', buttonText: '', buttonLink: '', couponCode: '', priority: 1, active: true });
-              }}
-              className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
-            >
-              <X className="w-4 h-4" />
-              Cancel
-            </button>
-          )}
         </div>
       </Card>
 
-      <Card title="Popup List">
-        <div className="space-y-3">
-          {popups.map(popup => (
-            <div key={popup.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-              <div className="flex items-center gap-4">
-                {popup.image && <img src={popup.image} alt={popup.title} className="w-16 h-16 object-cover rounded" />}
-                <div>
-                  <p className="font-medium">{popup.title}</p>
-                  <p className="text-sm text-gray-500">{popup.subtitle}</p>
-                  <span className={`px-2 py-1 rounded text-xs ${popup.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
-                    {popup.active ? 'Active' : 'Inactive'}
-                  </span>
+
+    </div>
+  );
+
+  const renderAlerts = () => {
+    const sections = [
+      { id: 'banners', label: 'Banners' },
+      { id: 'popups', label: 'Popups' },
+      { id: 'coupons', label: 'Coupons' },
+      { id: 'scrolling', label: 'Scrolling Text' },
+    ];
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-wrap gap-2 mb-2">
+          {sections.map(s => (
+            <button
+              key={s.id}
+              onClick={() => setAlertSection(s.id)}
+              className={`px-5 py-2.5 rounded-xl font-bold transition-all text-sm ${
+                alertSection === s.id
+                  ? 'bg-emerald-600 text-white shadow-md'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        {alertSection === 'banners' && (
+          <>
+            <Card title={editingBanner ? 'Edit Banner' : 'Add New Banner'}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input label="Banner Title *" value={bannerForm.title} onChange={(e) => setBannerForm({ ...bannerForm, title: e.target.value })} placeholder="e.g. Summer Sale" />
+                <div className="space-y-1">
+                  <label className="block text-sm font-medium text-gray-700">Display On *</label>
+                  <select value={bannerForm.type} onChange={(e) => setBannerForm({ ...bannerForm, type: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white">
+                    <option value="Desktop">Desktop only</option>
+                    <option value="Mobile">Mobile only</option>
+                    <option value="Both">Desktop &amp; Mobile</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-sm font-medium text-gray-700">Slide Animation</label>
+                  <select value={bannerForm.animation} onChange={(e) => setBannerForm({ ...bannerForm, animation: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white">
+                    <option value="Fade">Fade</option>
+                    <option value="Slide">Slide</option>
+                    <option value="Zoom">Zoom</option>
+                  </select>
+                </div>
+                <div className="flex items-end pb-1">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input type="checkbox" checked={bannerForm.active} onChange={(e) => setBannerForm({ ...bannerForm, active: e.target.checked })} className="w-4 h-4" />
+                    <span className="text-sm font-medium text-gray-700">Active (visible on site)</span>
+                  </label>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button onClick={() => { setEditingPopup(popup); setPopupForm(popup); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded">
-                  <Edit className="w-4 h-4" />
-                </button>
-                <button onClick={() => handleDeletePopup(popup.id)} className="p-2 text-red-600 hover:bg-red-50 rounded">
-                  <Trash2 className="w-4 h-4" />
-                </button>
+              <div className="mt-4 space-y-3">
+                <label className="block text-sm font-medium text-gray-700">Banner Image *</label>
+                {bannerForm.image && (
+                  <div className="relative inline-block">
+                    <img src={bannerForm.image} alt="Preview" className="w-full max-w-xs h-32 object-cover rounded-xl border border-gray-200" onError={(e) => { e.target.style.display = 'none'; }} />
+                    <button onClick={() => setBannerForm({ ...bannerForm, image: '' })} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow"><X className="w-3 h-3" /></button>
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center gap-3">
+                  <input type="file" accept="image/*" onChange={async (e) => { const file = e.target.files[0]; if (file) { const base64 = await convertFileToBase64(file); setBannerForm({ ...bannerForm, image: base64 }); } }} className="hidden" id="bannerImageUploadA" />
+                  <label htmlFor="bannerImageUploadA" className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg cursor-pointer hover:bg-emerald-700 text-sm"><Upload className="w-4 h-4" /> Upload Image</label>
+                  <span className="text-xs text-gray-400">or paste URL below</span>
+                </div>
+                <input type="text" value={bannerForm.image} onChange={(e) => setBannerForm({ ...bannerForm, image: e.target.value })} placeholder="https://... image URL (optional if uploaded)" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm" />
+                <p className="text-xs text-amber-600">Recommended: Desktop banners — 1200×400px landscape. Mobile banners — 600×800px portrait.</p>
               </div>
+              <div className="mt-5 flex gap-3">
+                <button onClick={handleSaveBanner} disabled={loading} className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"><Save className="w-4 h-4" /> {loading ? 'Saving...' : editingBanner ? 'Update Banner' : 'Add Banner'}</button>
+                {editingBanner && <button onClick={() => { setEditingBanner(null); setBannerForm({ title: '', image: '', type: 'Desktop', animation: 'Fade', active: true }); }} className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"><X className="w-4 h-4" /> Cancel</button>}
+              </div>
+            </Card>
+            <Card title={`Banner List (${banners.length})`}>
+              {banners.length === 0 ? <p className="text-gray-500 text-center py-8">No banners yet — add one above</p> : (
+                <div className="space-y-3">
+                  {banners.map(banner => (
+                    <div key={banner.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-100">
+                      <div className="flex items-center gap-4">
+                        {banner.image && <img src={banner.image} alt={banner.title} className="w-28 h-16 object-cover rounded-lg border border-gray-200 shrink-0" onError={(e) => { e.target.style.display = 'none'; }} />}
+                        <div>
+                          <p className="font-semibold text-gray-800">{banner.title}</p>
+                          <p className="text-sm text-gray-500 mt-0.5">
+                            <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold mr-2 ${banner.type === 'Mobile' ? 'bg-purple-100 text-purple-700' : banner.type === 'Both' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{banner.type === 'Both' ? 'Desktop & Mobile' : banner.type}</span>
+                            {banner.animation}
+                          </p>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${banner.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>{banner.active ? 'Active' : 'Inactive'}</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button onClick={() => { setEditingBanner(banner); setBannerForm({ title: banner.title, image: banner.image || '', type: banner.type || 'Desktop', animation: banner.animation || 'Fade', active: banner.active !== false }); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"><Edit className="w-4 h-4" /></button>
+                        <button onClick={() => handleDeleteBanner(banner.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          </>
+        )}
+
+        {alertSection === 'popups' && (
+          <>
+            <Card title={editingPopup ? 'Edit Popup' : 'Add New Popup'}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input label="Title" value={popupForm.title} onChange={(e) => setPopupForm({ ...popupForm, title: e.target.value })} />
+                <Input label="Subtitle" value={popupForm.subtitle} onChange={(e) => setPopupForm({ ...popupForm, subtitle: e.target.value })} />
+                <Input label="Button Text" value={popupForm.buttonText} onChange={(e) => setPopupForm({ ...popupForm, buttonText: e.target.value })} />
+                <Input label="Button Link" value={popupForm.buttonLink} onChange={(e) => setPopupForm({ ...popupForm, buttonLink: e.target.value })} />
+                <Input label="Coupon Code" value={popupForm.couponCode} onChange={(e) => setPopupForm({ ...popupForm, couponCode: e.target.value })} />
+                <Input label="Priority" type="number" value={popupForm.priority} onChange={(e) => setPopupForm({ ...popupForm, priority: Number(e.target.value) })} />
+              </div>
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                <textarea value={popupForm.description} onChange={(e) => setPopupForm({ ...popupForm, description: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" rows={3} />
+              </div>
+              <div className="mt-4 space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Image</label>
+                {popupForm.image && (
+                  <div className="relative inline-block">
+                    <img src={popupForm.image} alt="Preview" className="w-full max-w-xs h-32 object-cover rounded-xl border border-gray-200" onError={(e) => { e.target.style.display = 'none'; }} />
+                    <button onClick={() => setPopupForm({ ...popupForm, image: '' })} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow"><X className="w-3 h-3" /></button>
+                  </div>
+                )}
+                <textarea value={popupForm.image} onChange={(e) => setPopupForm({ ...popupForm, image: e.target.value })} placeholder="Image URL" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" rows={2} />
+                <div className="flex items-center gap-2">
+                  <input type="file" accept="image/*" onChange={async (e) => { const file = e.target.files[0]; if (file) { const base64 = await convertFileToBase64(file); setPopupForm({ ...popupForm, image: base64 }); } }} className="hidden" id="popupImageUploadA" />
+                  <label htmlFor="popupImageUploadA" className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"><Upload className="w-4 h-4" /> Upload Image</label>
+                </div>
+              </div>
+              <div className="mt-4 flex gap-3">
+                <label className="flex items-center gap-2"><input type="checkbox" checked={popupForm.active} onChange={(e) => setPopupForm({ ...popupForm, active: e.target.checked })} /> Active</label>
+              </div>
+              <div className="mt-4 flex gap-3">
+                <button onClick={handleSavePopup} disabled={loading} className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"><Save className="w-4 h-4" /> {loading ? 'Saving...' : editingPopup ? 'Update Popup' : 'Add Popup'}</button>
+                {editingPopup && <button onClick={() => { setEditingPopup(null); setPopupForm({ title: '', subtitle: '', description: '', image: '', buttonText: '', buttonLink: '', couponCode: '', priority: 1, active: true }); }} className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"><X className="w-4 h-4" /> Cancel</button>}
+              </div>
+            </Card>
+            <Card title="Popup List">
+              <div className="space-y-3">
+                {popups.map(popup => (
+                  <div key={popup.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                    <div className="flex items-center gap-4">
+                      {popup.image && <img src={popup.image} alt={popup.title} className="w-16 h-16 object-cover rounded" onError={(e) => { e.target.style.display = 'none'; }} />}
+                      <div>
+                        <p className="font-medium">{popup.title}</p>
+                        <p className="text-sm text-gray-500">{popup.subtitle}</p>
+                        <span className={`px-2 py-1 rounded text-xs ${popup.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>{popup.active ? 'Active' : 'Inactive'}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => { setEditingPopup(popup); setPopupForm(popup); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded"><Edit className="w-4 h-4" /></button>
+                      <button onClick={() => handleDeletePopup(popup.id)} className="p-2 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  </div>
+                ))}
+                {popups.length === 0 && <p className="text-gray-500 text-center py-8">No popups yet</p>}
+              </div>
+            </Card>
+          </>
+        )}
+
+        {alertSection === 'coupons' && (
+          <>
+            <Card title={editingCoupon ? 'Edit Coupon' : 'Add New Coupon'}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input label="Coupon Code" value={couponForm.code} onChange={(e) => setCouponForm({ ...couponForm, code: e.target.value.toUpperCase() })} />
+                <Input label="Label" value={couponForm.label} onChange={(e) => setCouponForm({ ...couponForm, label: e.target.value })} />
+                <Input label="Discount Value" type="number" value={couponForm.discount} onChange={(e) => setCouponForm({ ...couponForm, discount: e.target.value })} />
+                <select value={couponForm.discountType} onChange={(e) => setCouponForm({ ...couponForm, discountType: e.target.value })} className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                  <option value="percentage">Percentage (%)</option>
+                  <option value="flat">Flat Amount (₹)</option>
+                </select>
+                <Input label="Minimum Order Value" type="number" value={couponForm.minOrder} onChange={(e) => setCouponForm({ ...couponForm, minOrder: e.target.value })} />
+                <Input label="Maximum Discount" type="number" value={couponForm.maxDiscount} onChange={(e) => setCouponForm({ ...couponForm, maxDiscount: e.target.value })} />
+              </div>
+              <div className="mt-4 flex gap-3">
+                <label className="flex items-center gap-2"><input type="checkbox" checked={couponForm.active} onChange={(e) => setCouponForm({ ...couponForm, active: e.target.checked })} /> Active</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={couponForm.shouldPopup} onChange={(e) => setCouponForm({ ...couponForm, shouldPopup: e.target.checked })} /> Show as Popup</label>
+              </div>
+              <div className="mt-4 flex gap-3">
+                <button onClick={handleSaveCoupon} disabled={loading} className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"><Save className="w-4 h-4" /> {loading ? 'Saving...' : editingCoupon ? 'Update Coupon' : 'Add Coupon'}</button>
+                {editingCoupon && <button onClick={() => { setEditingCoupon(null); setCouponForm({ code: '', label: '', discount: '', discountType: 'percentage', minOrder: 0, maxDiscount: 0, active: true, shouldPopup: false }); }} className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"><X className="w-4 h-4" /> Cancel</button>}
+              </div>
+            </Card>
+            <Card title="Coupon List">
+              <div className="space-y-3">
+                {coupons.map(coupon => (
+                  <div key={coupon.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                    <div>
+                      <p className="font-medium text-lg">{coupon.code}</p>
+                      <p className="text-sm text-gray-500">{coupon.label}</p>
+                      <p className="text-sm font-semibold text-blue-600">{coupon.discountType === 'percentage' ? `${coupon.discount}% off` : `₹${coupon.discount} off`}</p>
+                      <div className="flex gap-2 mt-2">
+                        <span className={`px-2 py-1 rounded text-xs ${coupon.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>{coupon.active ? 'Active' : 'Inactive'}</span>
+                        {coupon.shouldPopup && <span className="px-2 py-1 rounded text-xs bg-purple-100 text-purple-700">Popup</span>}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => { setEditingCoupon(coupon); setCouponForm(coupon); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded"><Edit className="w-4 h-4" /></button>
+                      <button onClick={() => handleDeleteCoupon(coupon.id)} className="p-2 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  </div>
+                ))}
+                {coupons.length === 0 && <p className="text-gray-500 text-center py-8">No coupons yet</p>}
+              </div>
+            </Card>
+          </>
+        )}
+
+        {alertSection === 'scrolling' && (
+          <Card title="Scrolling Announcement Text">
+            <p className="text-sm text-gray-500 mb-4">Text scrolls right-to-left at the top of the header. Add, edit, or remove announcement messages.</p>
+            <div className="flex gap-2 mb-4">
+              <input type="text" value={scrollingTextInput} onChange={e => setScrollingTextInput(e.target.value)} placeholder="Enter announcement text..." className="flex-1 p-2.5 border border-gray-300 rounded-lg text-sm" onKeyDown={e => { if (e.key === 'Enter' && scrollingTextInput.trim()) { addScrollingText(scrollingTextInput.trim()); setScrollingTextInput(''); } }} />
+              <button onClick={() => { if (scrollingTextInput.trim()) { addScrollingText(scrollingTextInput.trim()); setScrollingTextInput(''); } }} className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm"><Plus className="w-4 h-4" /> Add</button>
             </div>
+            {scrollingTexts.length === 0 ? <p className="text-gray-400 text-sm text-center py-4">No announcements yet</p> : (
+              <div className="space-y-2">
+                {scrollingTexts.map((t, idx) => (
+                  <div key={t.id} className={`flex items-center justify-between p-3 rounded-lg border ${t.active ? 'border-emerald-200 bg-emerald-50/50' : 'border-gray-200 bg-gray-50'}`}>
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <span className="text-xs text-gray-400 font-mono w-6">#{idx + 1}</span>
+                      <span className={`text-sm truncate ${t.active ? 'text-gray-800' : 'text-gray-400 line-through'}`}>{t.text}</span>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      <button onClick={() => updateScrollingText(t.id, { active: !t.active })} className={`p-1.5 rounded ${t.active ? 'text-emerald-600 hover:bg-emerald-100' : 'text-gray-400 hover:bg-gray-200'}`} title={t.active ? 'Deactivate' : 'Activate'}>{t.active ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}</button>
+                      <button onClick={() => deleteScrollingText(t.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
+      </div>
+    );
+  };
+
+  const themePresets = [
+    { name: 'Default Green', primary: '#059669', secondary: '#10b981', surface: '#ecfdf5' },
+    { name: 'Ocean Blue', primary: '#2563eb', secondary: '#3b82f6', surface: '#eff6ff' },
+    { name: 'Royal Purple', primary: '#7c3aed', secondary: '#8b5cf6', surface: '#f5f3ff' },
+    { name: 'Warm Orange', primary: '#ea580c', secondary: '#f97316', surface: '#fff7ed' },
+    { name: 'Rose Pink', primary: '#e11d48', secondary: '#f43f5e', surface: '#fff1f2' },
+    { name: 'Dark Mode', primary: '#1e293b', secondary: '#334155', surface: '#0f172a' },
+  ];
+
+  const renderTheme = () => (
+    <div className="space-y-6">
+      <Card title="Theme Presets">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+          {themePresets.map(preset => (
+            <button
+              key={preset.name}
+              onClick={() => setThemeColors({ primary: preset.primary, secondary: preset.secondary, surface: preset.surface })}
+              className="p-4 rounded-xl border-2 border-gray-200 hover:border-emerald-500 transition-all text-center"
+              style={{ backgroundColor: preset.surface }}
+            >
+              <div className="flex gap-2 justify-center mb-2">
+                <div className="w-6 h-6 rounded-full" style={{ backgroundColor: preset.primary }} />
+                <div className="w-6 h-6 rounded-full" style={{ backgroundColor: preset.secondary }} />
+              </div>
+              <p className="text-xs font-medium text-gray-700">{preset.name}</p>
+            </button>
           ))}
-          {popups.length === 0 && <p className="text-gray-500 text-center py-8">No popups yet</p>}
         </div>
+        <div className="mt-4 flex gap-3">
+          <button
+            onClick={() => setThemeColors({ primary: '#059669', secondary: '#10b981', surface: '#ecfdf5' })}
+            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm"
+          >
+            Reset to Default
+          </button>
+        </div>
+      </Card>
+
+      <Card title="Custom Theme Colors">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700">Primary Color</label>
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={themeColors.primary}
+                onChange={(e) => setThemeColors({ ...themeColors, primary: e.target.value })}
+                className="w-16 h-12 rounded cursor-pointer"
+              />
+              <input
+                type="text"
+                value={themeColors.primary}
+                onChange={(e) => setThemeColors({ ...themeColors, primary: e.target.value })}
+                className="flex-1 p-3 border border-gray-300 rounded-lg"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700">Secondary Color</label>
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={themeColors.secondary}
+                onChange={(e) => setThemeColors({ ...themeColors, secondary: e.target.value })}
+                className="w-16 h-12 rounded cursor-pointer"
+              />
+              <input
+                type="text"
+                value={themeColors.secondary}
+                onChange={(e) => setThemeColors({ ...themeColors, secondary: e.target.value })}
+                className="flex-1 p-3 border border-gray-300 rounded-lg"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700">Surface Color</label>
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={themeColors.surface}
+                onChange={(e) => setThemeColors({ ...themeColors, surface: e.target.value })}
+                className="w-16 h-12 rounded cursor-pointer"
+              />
+              <input
+                type="text"
+                value={themeColors.surface}
+                onChange={(e) => setThemeColors({ ...themeColors, surface: e.target.value })}
+                className="flex-1 p-3 border border-gray-300 rounded-lg"
+              />
+            </div>
+          </div>
+        </div>
+        <div className="mt-6 p-6 rounded-lg border-2 border-dashed border-gray-300" style={{ backgroundColor: themeColors.surface }}>
+          <h3 style={{ color: themeColors.primary }} className="text-xl font-bold mb-2">Preview</h3>
+          <button style={{ backgroundColor: themeColors.primary }} className="px-4 py-2 text-white rounded mr-2">Primary Button</button>
+          <button style={{ backgroundColor: themeColors.secondary }} className="px-4 py-2 text-white rounded">Secondary Button</button>
+        </div>
+        <button
+          onClick={handleSaveTheme}
+          disabled={loading}
+          className="mt-6 flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+        >
+          <Save className="w-4 h-4" />
+          {loading ? 'Saving...' : 'Save Theme'}
+        </button>
       </Card>
     </div>
   );
 
-  const renderBanners = () => (
+  const renderActivityLogs = () => (
     <div className="space-y-6">
-      <Card title={editingBanner ? 'Edit Banner' : 'Add New Banner'}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input
-            label="Banner Title *"
-            value={bannerForm.title}
-            onChange={(e) => setBannerForm({ ...bannerForm, title: e.target.value })}
-            placeholder="e.g. Summer Sale"
-          />
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">Display On *</label>
-            <select
-              value={bannerForm.type}
-              onChange={(e) => setBannerForm({ ...bannerForm, type: e.target.value })}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-            >
-              <option value="Desktop">Desktop only</option>
-              <option value="Mobile">Mobile only</option>
-              <option value="Both">Desktop &amp; Mobile</option>
-            </select>
-            <p className="text-xs text-gray-400">Choose where this banner appears</p>
-          </div>
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">Slide Animation</label>
-            <select
-              value={bannerForm.animation}
-              onChange={(e) => setBannerForm({ ...bannerForm, animation: e.target.value })}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-            >
-              <option value="Fade">Fade</option>
-              <option value="Slide">Slide</option>
-              <option value="Zoom">Zoom</option>
-            </select>
-          </div>
-          <div className="flex items-end pb-1">
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={bannerForm.active}
-                onChange={(e) => setBannerForm({ ...bannerForm, active: e.target.checked })}
-                className="w-4 h-4"
-              />
-              <span className="text-sm font-medium text-gray-700">Active (visible on site)</span>
-            </label>
-          </div>
-        </div>
-
-        {/* Image upload */}
-        <div className="mt-4 space-y-3">
-          <label className="block text-sm font-medium text-gray-700">Banner Image *</label>
-          {bannerForm.image && (
-            <div className="relative inline-block">
-              <img
-                src={bannerForm.image}
-                alt="Preview"
-                className="w-full max-w-xs h-32 object-cover rounded-xl border border-gray-200"
-              />
-              <button
-                onClick={() => setBannerForm({ ...bannerForm, image: '' })}
-                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </div>
-          )}
-          <div className="flex flex-wrap items-center gap-3">
-            <input
-              type="file"
-              accept="image/*"
-              onChange={async (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                  const base64 = await convertFileToBase64(file);
-                  setBannerForm({ ...bannerForm, image: base64 });
-                }
-              }}
-              className="hidden"
-              id="bannerImageUpload"
-            />
-            <label
-              htmlFor="bannerImageUpload"
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg cursor-pointer hover:bg-emerald-700 text-sm"
-            >
-              <Upload className="w-4 h-4" />
-              Upload Image
-            </label>
-            <span className="text-xs text-gray-400">or paste URL below</span>
-          </div>
-          <input
-            type="text"
-            value={bannerForm.image}
-            onChange={(e) => setBannerForm({ ...bannerForm, image: e.target.value })}
-            placeholder="https://... image URL (optional if uploaded)"
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
-          />
-          <p className="text-xs text-amber-600">
-            Recommended: Desktop banners — 1200×400px landscape. Mobile banners — 600×800px portrait.
-          </p>
-        </div>
-
-        <div className="mt-5 flex gap-3">
+      <Card title="Activity Logs">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-sm text-gray-500">Showing last 100 activities</p>
           <button
-            onClick={handleSaveBanner}
-            disabled={loading}
-            className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+            onClick={async () => {
+              if (!confirm('Delete all activity logs permanently from Firestore?')) return;
+              try {
+                const { collection, getDocs, deleteDoc, doc } = await import('firebase/firestore');
+                const snap = await getDocs(collection(db, 'activityLogs'));
+                const promises = [];
+                snap.forEach(d => promises.push(deleteDoc(doc(db, 'activityLogs', d.id))));
+                await Promise.all(promises);
+                showMessage('All activity logs deleted');
+              } catch (err) {
+                showMessage('Failed to delete logs', 'error');
+              }
+            }}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium"
           >
-            <Save className="w-4 h-4" />
-            {loading ? 'Saving...' : editingBanner ? 'Update Banner' : 'Add Banner'}
+            Delete All
           </button>
-          {editingBanner && (
-            <button
-              onClick={() => {
-                setEditingBanner(null);
-                setBannerForm({ title: '', image: '', type: 'Desktop', animation: 'Fade', active: true });
-              }}
-              className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
-            >
-              <X className="w-4 h-4" />
-              Cancel
-            </button>
-          )}
         </div>
-      </Card>
-
-      <Card title={`Banner List (${banners.length})`}>
-        {banners.length === 0 ? (
-          <p className="text-gray-500 text-center py-8">No banners yet — add one above</p>
+        {activityLogs.length === 0 ? (
+          <p className="text-gray-500 text-center py-8">No activity logs yet</p>
         ) : (
-          <div className="space-y-3">
-            {banners.map(banner => (
-              <div key={banner.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-100">
-                <div className="flex items-center gap-4">
-                  {banner.image && (
-                    <img src={banner.image} alt={banner.title} className="w-28 h-16 object-cover rounded-lg border border-gray-200 shrink-0" />
-                  )}
-                  <div>
-                    <p className="font-semibold text-gray-800">{banner.title}</p>
-                    <p className="text-sm text-gray-500 mt-0.5">
-                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold mr-2 ${
-                        banner.type === 'Mobile' ? 'bg-purple-100 text-purple-700' :
-                        banner.type === 'Both' ? 'bg-blue-100 text-blue-700' :
-                        'bg-emerald-100 text-emerald-700'
-                      }`}>
-                        {banner.type === 'Both' ? 'Desktop & Mobile' : banner.type}
-                      </span>
-                      {banner.animation}
-                    </p>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${banner.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
-                      {banner.active ? 'Active' : 'Inactive'}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  <button
-                    onClick={() => { setEditingBanner(banner); setBannerForm({ title: banner.title, image: banner.image || '', type: banner.type || 'Desktop', animation: banner.animation || 'Fade', active: banner.active !== false }); }}
-                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
-                  >
-                    <Edit className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => handleDeleteBanner(banner.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left p-3 text-sm">Timestamp</th>
+                  <th className="text-left p-3 text-sm">User</th>
+                  <th className="text-left p-3 text-sm">Action</th>
+                  <th className="p-3 text-sm">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activityLogs.slice(0, 100).map((log, idx) => (
+                  <tr key={log.id || idx} className="border-b hover:bg-gray-50">
+                    <td className="p-3 text-sm text-gray-500">{log.timestamp}</td>
+                    <td className="p-3 text-sm font-medium">{log.user}</td>
+                    <td className="p-3 text-sm">{log.action}</td>
+                    <td className="p-3 text-center">
+                      <button
+                        onClick={async () => {
+                          if (!confirm('Delete this log entry?')) return;
+                          try {
+                            const { deleteDoc, doc: fd } = await import('firebase/firestore');
+                            await deleteDoc(fd(db, 'activityLogs', log.id));
+                            showMessage('Log deleted');
+                          } catch (err) {
+                            showMessage('Failed to delete log', 'error');
+                          }
+                        }}
+                        className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </Card>
     </div>
-  );
-
-  const renderCoupons = () => (
-    <div className="space-y-6">
-      <Card title={editingCoupon ? 'Edit Coupon' : 'Add New Coupon'}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input
-            label="Coupon Code"
-            value={couponForm.code}
-            onChange={(e) => setCouponForm({ ...couponForm, code: e.target.value.toUpperCase() })}
-          />
-          <Input
-            label="Label"
-            value={couponForm.label}
-            onChange={(e) => setCouponForm({ ...couponForm, label: e.target.value })}
-          />
-          <Input
-            label="Discount Value"
-            type="number"
-            value={couponForm.discount}
-            onChange={(e) => setCouponForm({ ...couponForm, discount: e.target.value })}
-          />
-          <select
-            value={couponForm.discountType}
-            onChange={(e) => setCouponForm({ ...couponForm, discountType: e.target.value })}
-            className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="percentage">Percentage (%)</option>
-            <option value="flat">Flat Amount (₹)</option>
-          </select>
-          <Input
-            label="Minimum Order Value"
-            type="number"
-            value={couponForm.minOrder}
-            onChange={(e) => setCouponForm({ ...couponForm, minOrder: e.target.value })}
-          />
-          <Input
-            label="Maximum Discount"
-            type="number"
-            value={couponForm.maxDiscount}
-            onChange={(e) => setCouponForm({ ...couponForm, maxDiscount: e.target.value })}
-          />
-        </div>
-        <div className="mt-4 flex gap-3">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={couponForm.active}
-              onChange={(e) => setCouponForm({ ...couponForm, active: e.target.checked })}
-            />
-            Active
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={couponForm.shouldPopup}
-              onChange={(e) => setCouponForm({ ...couponForm, shouldPopup: e.target.checked })}
-            />
-            Show as Popup
-          </label>
-        </div>
-        <div className="mt-4 flex gap-3">
-          <button
-            onClick={handleSaveCoupon}
-            disabled={loading}
-            className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-          >
-            <Save className="w-4 h-4" />
-            {loading ? 'Saving...' : editingCoupon ? 'Update Coupon' : 'Add Coupon'}
-          </button>
-          {editingCoupon && (
-            <button
-              onClick={() => {
-                setEditingCoupon(null);
-                setCouponForm({ code: '', label: '', discount: '', discountType: 'percentage', minOrder: 0, maxDiscount: 0, active: true, shouldPopup: false });
-              }}
-              className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
-            >
-              <X className="w-4 h-4" />
-              Cancel
-            </button>
-          )}
-        </div>
-      </Card>
-
-      <Card title="Coupon List">
-        <div className="space-y-3">
-          {coupons.map(coupon => (
-            <div key={coupon.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-              <div>
-                <p className="font-medium text-lg">{coupon.code}</p>
-                <p className="text-sm text-gray-500">{coupon.label}</p>
-                <p className="text-sm font-semibold text-blue-600">
-                  {coupon.discountType === 'percentage' ? `${coupon.discount}% off` : `₹${coupon.discount} off`}
-                </p>
-                <div className="flex gap-2 mt-2">
-                  <span className={`px-2 py-1 rounded text-xs ${coupon.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
-                    {coupon.active ? 'Active' : 'Inactive'}
-                  </span>
-                  {coupon.shouldPopup && <span className="px-2 py-1 rounded text-xs bg-purple-100 text-purple-700">Popup</span>}
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => { setEditingCoupon(coupon); setCouponForm(coupon); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded">
-                  <Edit className="w-4 h-4" />
-                </button>
-                <button onClick={() => handleDeleteCoupon(coupon.id)} className="p-2 text-red-600 hover:bg-red-50 rounded">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          ))}
-          {coupons.length === 0 && <p className="text-gray-500 text-center py-8">No coupons yet</p>}
-        </div>
-      </Card>
-    </div>
-  );
-
-  const renderTheme = () => (
-    <Card title="Theme Colors">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Primary Color</label>
-          <div className="flex items-center gap-3">
-            <input
-              type="color"
-              value={themeColors.primary}
-              onChange={(e) => setThemeColors({ ...themeColors, primary: e.target.value })}
-              className="w-16 h-12 rounded cursor-pointer"
-            />
-            <input
-              type="text"
-              value={themeColors.primary}
-              onChange={(e) => setThemeColors({ ...themeColors, primary: e.target.value })}
-              className="flex-1 p-3 border border-gray-300 rounded-lg"
-            />
-          </div>
-        </div>
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Secondary Color</label>
-          <div className="flex items-center gap-3">
-            <input
-              type="color"
-              value={themeColors.secondary}
-              onChange={(e) => setThemeColors({ ...themeColors, secondary: e.target.value })}
-              className="w-16 h-12 rounded cursor-pointer"
-            />
-            <input
-              type="text"
-              value={themeColors.secondary}
-              onChange={(e) => setThemeColors({ ...themeColors, secondary: e.target.value })}
-              className="flex-1 p-3 border border-gray-300 rounded-lg"
-            />
-          </div>
-        </div>
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Surface Color</label>
-          <div className="flex items-center gap-3">
-            <input
-              type="color"
-              value={themeColors.surface}
-              onChange={(e) => setThemeColors({ ...themeColors, surface: e.target.value })}
-              className="w-16 h-12 rounded cursor-pointer"
-            />
-            <input
-              type="text"
-              value={themeColors.surface}
-              onChange={(e) => setThemeColors({ ...themeColors, surface: e.target.value })}
-              className="flex-1 p-3 border border-gray-300 rounded-lg"
-            />
-          </div>
-        </div>
-      </div>
-      <div className="mt-6 p-6 rounded-lg border-2 border-dashed border-gray-300" style={{ backgroundColor: themeColors.surface }}>
-        <h3 style={{ color: themeColors.primary }} className="text-xl font-bold mb-2">Preview</h3>
-        <button style={{ backgroundColor: themeColors.primary }} className="px-4 py-2 text-white rounded mr-2">Primary Button</button>
-        <button style={{ backgroundColor: themeColors.secondary }} className="px-4 py-2 text-white rounded">Secondary Button</button>
-      </div>
-      <button
-        onClick={handleSaveTheme}
-        disabled={loading}
-        className="mt-6 flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-      >
-        <Save className="w-4 h-4" />
-        {loading ? 'Saving...' : 'Save Theme'}
-      </button>
-    </Card>
   );
 
   return (
@@ -2211,9 +2746,9 @@ const AdminDashboard = () => {
                   <div>
                     <p className="text-sm text-gray-500">Status</p>
                     <span className={`px-3 py-1 rounded-full text-sm ${
-                      selectedOrder.status === 'Delivered' ? 'bg-green-100 text-green-700' :
                       selectedOrder.status === 'Cancelled' ? 'bg-red-100 text-red-700' :
-                      'bg-yellow-100 text-yellow-700'
+                      selectedOrder.status === 'Delivered' ? 'bg-green-100 text-green-700' :
+                      'bg-orange-100 text-orange-700'
                     }`}>{selectedOrder.status}</span>
                   </div>
                   <div>
@@ -2292,8 +2827,8 @@ const AdminDashboard = () => {
                   <div className="space-y-3">
                     {selectedOrder.items?.map((item, index) => (
                       <div key={index} className="flex items-center gap-4 p-3 bg-gray-50 rounded-xl">
-                        {item.images?.[0] && (
-                          <img src={item.images[0]} alt={item.name} className="w-16 h-16 object-cover rounded-lg" />
+                        {(item.selectedImage || item.images?.[0]) && (
+                          <img src={getItemImage(item, products)} alt={item.name} className="w-16 h-16 object-cover rounded-lg" onError={(e) => { e.target.style.display = 'none'; }} />
                         )}
                         <div className="flex-1">
                           <p className="font-medium">{item.name}</p>
@@ -2374,6 +2909,7 @@ const AdminDashboard = () => {
                   <option value="Confirmed">Confirmed</option>
                   <option value="Packed">Packed</option>
                   <option value="Shipped">Shipped</option>
+                  <option value="On the Way">On the Way</option>
                   <option value="Delivered">Delivered</option>
                   <option value="Cancelled">Cancelled</option>
                 </select>
@@ -2384,6 +2920,58 @@ const AdminDashboard = () => {
                   Close
                 </button>
               </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setShowDeleteConfirm(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-800">Confirm Delete</h2>
+                <button onClick={() => setShowDeleteConfirm(null)} className="p-2 hover:bg-gray-100 rounded-full">
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+              <div className="space-y-4">
+                <p className="text-gray-600">
+                  {showDeleteConfirm.type === 'orders'
+                    ? `Are you sure you want to permanently delete ${showDeleteConfirm.ids.length} order(s)? This action cannot be undone.`
+                    : 'Are you sure you want to permanently delete this product? This action cannot be undone.'}
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowDeleteConfirm(null)}
+                    className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={showDeleteConfirm.type === 'orders' ? handleDeleteOrders : () => {
+                      handleDeleteProduct(showDeleteConfirm.productId);
+                      setShowDeleteConfirm(null);
+                    }}
+                    className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
@@ -2452,6 +3040,101 @@ const AdminDashboard = () => {
         )}
       </AnimatePresence>
 
+      {/* Customer Detail Modal */}
+      <AnimatePresence>
+        {selectedCustomer && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setSelectedCustomer(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative bg-white rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-bold text-gray-800">Customer Details</h3>
+                <button onClick={() => setSelectedCustomer(null)} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5" /></button>
+              </div>
+              {(() => {
+                const { customer: c, orders: customerOrders } = selectedCustomer;
+                const totalSpent = customerOrders.reduce((sum, o) => sum + (o.grandTotal || o.total || 0), 0);
+                return (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-4 bg-gray-50 rounded-xl">
+                        <p className="text-xs text-gray-500 mb-1">Name</p>
+                        <p className="font-semibold">{c.shippingAddress?.name || 'N/A'}</p>
+                      </div>
+                      <div className="p-4 bg-gray-50 rounded-xl">
+                        <p className="text-xs text-gray-500 mb-1">Phone</p>
+                        <p className="font-semibold">{c.shippingAddress?.phone || 'N/A'}</p>
+                      </div>
+                      <div className="p-4 bg-gray-50 rounded-xl col-span-2">
+                        <p className="text-xs text-gray-500 mb-1">Email</p>
+                        <p className="font-semibold break-all">{c.userEmail || c.shippingAddress?.email || 'N/A'}</p>
+                      </div>
+                      <div className="p-4 bg-gray-50 rounded-xl col-span-2">
+                        <p className="text-xs text-gray-500 mb-1">Address</p>
+                        <p className="font-semibold">{[c.shippingAddress?.addressLine1, c.shippingAddress?.addressLine2].filter(Boolean).join(', ') || 'N/A'}</p>
+                      </div>
+                      <div className="p-4 bg-gray-50 rounded-xl">
+                        <p className="text-xs text-gray-500 mb-1">City</p>
+                        <p className="font-semibold">{c.shippingAddress?.city || 'N/A'}</p>
+                      </div>
+                      <div className="p-4 bg-gray-50 rounded-xl">
+                        <p className="text-xs text-gray-500 mb-1">State</p>
+                        <p className="font-semibold">{c.shippingAddress?.state || 'N/A'}</p>
+                      </div>
+                      <div className="p-4 bg-gray-50 rounded-xl">
+                        <p className="text-xs text-gray-500 mb-1">Pincode</p>
+                        <p className="font-semibold">{c.shippingAddress?.pincode || 'N/A'}</p>
+                      </div>
+                      <div className="p-4 bg-gray-50 rounded-xl">
+                        <p className="text-xs text-gray-500 mb-1">Total Orders</p>
+                        <p className="font-semibold text-emerald-600">{customerOrders.length}</p>
+                      </div>
+                    </div>
+                    <div className="p-4 bg-gradient-to-r from-emerald-50 to-green-50 rounded-xl">
+                      <p className="text-xs text-gray-500 mb-1">Total Spent</p>
+                      <p className="text-2xl font-bold text-emerald-700">₹{totalSpent.toFixed(2)}</p>
+                    </div>
+                    {customerOrders.length > 0 && (
+                      <div>
+                        <p className="text-sm font-semibold text-gray-700 mb-2">Recent Orders</p>
+                        <div className="space-y-2 max-h-40 overflow-y-auto">
+                          {customerOrders.sort((a, b) => { const ta = new Date(a.createdAt || a.date).getTime() || 0; const tb = new Date(b.createdAt || b.date).getTime() || 0; return tb - ta; }).slice(0, 5).map(o => (
+                            <div key={o.id} className="flex items-center justify-between p-3 bg-white border rounded-lg text-sm">
+                              <div>
+                                <p className="font-medium text-gray-800">#{o.id?.slice(-6)}</p>
+                                <p className="text-xs text-gray-500">{o.date}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-semibold">₹{(o.grandTotal || o.total || 0).toFixed(2)}</p>
+                                <span className={`text-xs px-2 py-0.5 rounded ${
+                                  o.status === 'Cancelled' ? 'bg-red-100 text-red-700' :
+                                  o.status === 'Delivered' ? 'bg-green-100 text-green-700' :
+                                  'bg-orange-100 text-orange-700'
+                                }`}>{o.status}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
@@ -2503,7 +3186,7 @@ const AdminDashboard = () => {
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1">
+        <main className="flex-1 min-w-0 overflow-x-auto">
           {message && (
             <div className={`mb-4 p-4 rounded-lg ${message.includes('error') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
               {message}
@@ -2516,10 +3199,10 @@ const AdminDashboard = () => {
           {activeTab === 'products' && renderProducts()}
           {activeTab === 'orders' && renderOrders()}
           {activeTab === 'customers' && renderCustomers()}
-          {activeTab === 'popups' && renderPopups()}
-          {activeTab === 'banners' && renderBanners()}
-          {activeTab === 'coupons' && renderCoupons()}
+          {activeTab === 'reviews' && renderReviews()}
+          {activeTab === 'alerts' && renderAlerts()}
           {activeTab === 'theme' && renderTheme()}
+          {activeTab === 'activity' && renderActivityLogs()}
           {activeTab === 'settings' && renderSettings()}
         </main>
       </div>
@@ -2529,20 +3212,18 @@ const AdminDashboard = () => {
 
 const StatCard = ({ label, value, icon: Icon, color, isNew = false }) => (
   <motion.div 
-    className={`bg-white rounded-xl shadow-sm p-6 ${isNew ? 'relative overflow-hidden' : ''}`}
+    className={`bg-white rounded-xl shadow-sm p-4 sm:p-5 ${isNew ? 'relative overflow-hidden' : ''}`}
     animate={isNew ? { 
       boxShadow: ['0 0 0 0 rgba(245, 158, 11, 0.7)', '0 0 0 10px rgba(245, 158, 11, 0)', '0 0 0 0 rgba(245, 158, 11, 0.7)']
     } : {}}
     transition={isNew ? { duration: 2, repeat: Infinity } : {}}
   >
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-gray-500 text-sm">{label}</p>
-        <p className="text-xl md:text-2xl font-bold text-gray-800 mt-1">{value}</p>
+    <div className="flex flex-col items-center text-center gap-1">
+      <div className={`p-2 sm:p-3 ${color} rounded-lg shrink-0`}>
+        <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
       </div>
-      <div className={`p-3 ${color} rounded-lg`}>
-        <Icon className="w-6 h-6 text-white" />
-      </div>
+      <p className="text-gray-500 text-xs sm:text-sm whitespace-nowrap">{label}</p>
+      <p className="text-base sm:text-lg lg:text-xl font-bold text-gray-800 mt-0.5 truncate">{value}</p>
     </div>
     {isNew && (
       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-yellow-400 to-orange-400" />

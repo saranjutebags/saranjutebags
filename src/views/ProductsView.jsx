@@ -38,7 +38,7 @@ const ProductsView = () => {
   });
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-24 sm:pt-28 pb-16">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
 
         {/* ── Heading ── */}
@@ -203,17 +203,17 @@ const ProductsView = () => {
                   </div>
 
                   {/* Buttons */}
-                  <div className="flex gap-2">
+                  <div className="flex gap-1.5 sm:gap-2">
                     <button
                       onClick={() => addToCart(product)}
-                      className="flex-1 btn-primary py-2.5 flex items-center justify-center gap-1.5 text-xs sm:text-sm font-semibold"
+                      className="flex-1 btn-primary py-2 sm:py-2.5 flex items-center justify-center gap-1 sm:gap-1.5 text-[11px] sm:text-sm font-semibold whitespace-nowrap min-w-0"
                     >
-                      <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
-                      <span>Add to Cart</span>
+                      <ShoppingBag className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+                      <span className="truncate">Add to Cart</span>
                     </button>
                     <button
                       onClick={() => navigate(`/product/${product.id}`)}
-                      className="btn-secondary px-3 py-2.5 text-xs sm:text-sm font-semibold shrink-0"
+                      className="btn-secondary px-2 sm:px-3 py-2 sm:py-2.5 text-[11px] sm:text-sm font-semibold shrink-0 whitespace-nowrap"
                     >
                       View
                     </button>

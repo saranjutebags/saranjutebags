@@ -18,7 +18,7 @@ const branches = [
 
 const ContactView = () => {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-24 pb-16">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-12">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-100 text-emerald-700 font-semibold mb-4">
@@ -42,9 +42,9 @@ const ContactView = () => {
           <div className="glass rounded-3xl p-8 border border-emerald-100">
             <h2 className="text-2xl font-bold text-gray-800 mb-4">Contact Details</h2>
             <div className="space-y-4 text-gray-700">
-              <div className="flex items-center gap-3"><Phone className="w-5 h-5 text-emerald-600" /> +91 XXXXXXXXXX</div>
-              <div className="flex items-center gap-3"><Mail className="w-5 h-5 text-emerald-600" /> info@saranjutebags.co.in</div>
-              <div className="flex items-center gap-3"><MapPin className="w-5 h-5 text-emerald-600" /> Hyderabad, Telangana, India</div>
+              <div className="flex items-center gap-3"><Phone className="w-5 h-5 text-emerald-600" /> +91 9866027027 / +91 9701000234</div>
+              <div className="flex items-center gap-3"><Mail className="w-5 h-5 text-emerald-600" /> saranjutebags@gmail.com</div>
+              <div className="flex items-center gap-3"><MapPin className="w-5 h-5 text-emerald-600" /> 12-2-420/14 Alapati Nagar Road, Gudi Malkapur, Mehdipatnam, Hyderabad, Telangana 500028</div>
             </div>
           </div>
 

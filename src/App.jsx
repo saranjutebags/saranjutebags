@@ -22,6 +22,8 @@ import CategoriesView from './views/CategoriesView';
 import AboutView from './views/AboutView';
 import ContactView from './views/ContactView';
 import WishlistView from './views/WishlistView';
+import PrivacyView from './views/PrivacyView';
+import TermsView from './views/TermsView';
 import CartToast from './components/CartToast';
 import HelpFloatButton from './components/HelpFloatButton';
 import CouponPopup from './components/CouponPopup';
@@ -95,7 +97,9 @@ const AppShell = () => {
         <Route path="/categories" element={<CategoriesView />} />
         <Route path="/about" element={<AboutView />} />
         <Route path="/contact" element={<ContactView />} />
-      </Routes>
+        <Route path="/privacy" element={<PrivacyView />} />
+        <Route path="/terms" element={<TermsView />} />
+        </Routes>
     </div>
   );
 };

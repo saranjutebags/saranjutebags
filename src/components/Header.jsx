@@ -27,7 +27,7 @@ const Header = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const { user, userData, signOut } = useAuth();
-  const { companySettings } = useAdmin();
+  const { companySettings, scrollingTexts } = useAdmin();
   const { cartCount } = useCart();
   const navigate = useNavigate();
 
@@ -55,7 +55,19 @@ const Header = () => {
       animate={{ y: 0 }}
       className="fixed top-0 left-0 right-0 z-40 glass shadow-lg"
     >
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
+      {/* Scrolling Announcement Bar */}
+      {scrollingTexts && scrollingTexts.filter(t => t.active).length > 0 && (
+        <div className="relative w-screen" style={{ marginLeft: 'calc(-50vw + 50%)', marginRight: 'calc(-50vw + 50%)' }}>
+          <div className="bg-gradient-to-r from-emerald-600 to-green-600 text-white text-[11px] sm:text-xs font-medium overflow-hidden h-7 sm:h-8 flex items-center">
+            <div className="marquee-track flex gap-12 whitespace-nowrap animate-marquee">
+              {[...Array(3)].flatMap(() => scrollingTexts.filter(t => t.active)).map((t, i) => (
+                <span key={`${t.id}-${i}`} className="px-4">{t.text}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      <div className={scrollingTexts && scrollingTexts.filter(t => t.active).length > 0 ? 'max-w-7xl mx-auto px-3 sm:px-4 lg:px-8' : 'max-w-7xl mx-auto px-3 sm:px-4 lg:px-8'}>
         <div className="flex items-center justify-between h-16 sm:h-20">
           {/* Logo */}
           <Link to="/" className="flex items-center space-x-2 hover:scale-105 transition-transform min-w-0 shrink-0">
@@ -73,7 +85,7 @@ const Header = () => {
                 SJB
               </div>
             </div>
-            <span className="text-sm sm:text-base lg:text-xl font-bold text-gradient truncate max-w-[110px] sm:max-w-[180px] lg:max-w-none">
+            <span className="text-xs sm:text-base lg:text-xl font-bold text-gradient truncate max-w-[160px] sm:max-w-[200px] lg:max-w-none">
               {companySettings?.companyName || 'Saran Jute Bags'}
             </span>
           </Link>
@@ -92,8 +104,8 @@ const Header = () => {
           </nav>
 
           {/* Right Actions */}
-          <div className="flex items-center space-x-1 sm:space-x-2 shrink-0">
-            <button className="p-1.5 sm:p-2 hover:bg-emerald-50 rounded-full transition-colors">
+          <div className="flex items-center space-x-0.5 sm:space-x-2 shrink-0">
+            <button className="hidden sm:block p-1.5 sm:p-2 hover:bg-emerald-50 rounded-full transition-colors">
               <Search className="w-4 h-4 sm:w-5 sm:h-5 text-gray-700" />
             </button>
 
@@ -120,9 +132,9 @@ const Header = () => {
               <div className="relative">
                 <button
                   onClick={() => setIsProfileOpen(!isProfileOpen)}
-                  className="flex items-center space-x-1 sm:space-x-2 px-1.5 sm:px-3 py-1.5 sm:py-2 hover:bg-emerald-50 rounded-lg transition-colors"
+                  className="flex items-center space-x-1 sm:space-x-2 px-1 sm:px-3 py-1 sm:py-2 hover:bg-emerald-50 rounded-lg transition-colors"
                 >
-                  <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-emerald-500 to-forest-500 rounded-full flex items-center justify-center text-white font-semibold shadow-md text-sm shrink-0">
+                  <div className="w-7 h-7 sm:w-10 sm:h-10 bg-gradient-to-br from-emerald-500 to-forest-500 rounded-full flex items-center justify-center text-white font-semibold shadow-md text-xs sm:text-sm shrink-0">
                     {(user.displayName || user.email)?.[0]?.toUpperCase()}
                   </div>
                   <div className="hidden md:block text-left">
@@ -200,9 +212,9 @@ const Header = () => {
             ) : (
               <button
                 onClick={() => navigate('/auth')}
-                className="btn-primary text-xs sm:text-sm px-3 sm:px-5 py-2 sm:py-2.5 flex items-center space-x-1.5"
+                className="btn-primary text-xs sm:text-sm px-2 sm:px-5 py-1.5 sm:py-2.5 flex items-center space-x-1"
               >
-                <User className="w-4 h-4" />
+                <User className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 <span className="hidden sm:inline">Login</span>
               </button>
             )}

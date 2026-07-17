@@ -2,13 +2,16 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, ChevronRight, Package, ShoppingBag } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
+import { useProducts } from '../contexts/ProductContext';
+import { getItemImage } from '../utils/orderImageUtils';
 
 const OrdersView = () => {
   const navigate = useNavigate();
   const { orders } = useCart();
+  const { products } = useProducts();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-24 sm:pt-28 pb-16">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
       <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8">
         <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-gray-600 hover:text-emerald-600 mb-6 transition-colors">
           <ArrowLeft className="w-5 h-5" />
@@ -36,14 +39,18 @@ const OrdersView = () => {
                   <div className="flex flex-col sm:flex-row items-start gap-4">
                     <div className="w-20 sm:w-28 shrink-0">
                       <div className="rounded-2xl bg-white border border-gray-100 p-2">
-                        <img src={order.items[0]?.images?.[0]} alt={order.items[0]?.name} className="w-full h-16 sm:h-20 object-contain" />
+                        <img src={getItemImage(order.items[0], products)} alt={order.items[0]?.name} className="w-full h-16 sm:h-20 object-contain" />
                       </div>
                     </div>
 
                     <div className="flex-1 min-w-0 w-full">
                       <div className="flex flex-wrap items-center gap-3 mb-2">
                         <p className="text-sm sm:text-lg font-bold text-gray-800 break-all">Order {order.id}</p>
-                        <span className="text-[10px] sm:text-xs font-semibold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700">{order.status}</span>
+                        <span className={`text-[10px] sm:text-xs font-semibold px-3 py-1 rounded-full ${
+  order.status === 'Cancelled' ? 'bg-red-100 text-red-700' :
+  order.status === 'Delivered' ? 'bg-green-100 text-green-700' :
+  'bg-orange-100 text-orange-700'
+}`}>{order.status}</span>
                       </div>
                       <p className="text-xs sm:text-sm text-gray-600 mb-1">{order.items.length} item(s) • {order.paymentMethod}</p>
                       <p className="text-xs sm:text-sm text-gray-500 mb-3 break-all">Placed on {order.date}</p>
@@ -51,7 +58,7 @@ const OrdersView = () => {
                       <div className="flex flex-wrap gap-2 mb-4">
                         {order.items.slice(0, 2).map((item) => (
                           <div key={item.id} className="flex items-center gap-2 rounded-full bg-white border border-gray-100 px-3 py-1.5">
-                            <img src={item.images?.[0]} alt={item.name} className="w-4 h-4 object-contain rounded-full" />
+                            <img src={getItemImage(item, products)} alt={item.name} className="w-4 h-4 object-contain rounded-full" />
                             <span className="text-[10px] sm:text-xs font-medium text-gray-700 max-w-[120px] truncate">{item.name}</span>
                           </div>
                         ))}

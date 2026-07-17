@@ -1,15 +1,23 @@
+import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Package, ShoppingBag } from 'lucide-react';
+import { Package, ShoppingBag, Volume2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 
 const OrderDoneView = () => {
   const navigate = useNavigate();
   const { latestOrder } = useCart();
+  const audioRef = useRef(null);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.play().catch(() => {});
+    }
+  }, []);
 
   if (!latestOrder) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 pb-16 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16 flex items-center justify-center">
         <div className="glass rounded-3xl p-10 border border-emerald-100 text-center max-w-md mx-4">
           <Package className="w-16 h-16 text-emerald-600 mx-auto mb-4" />
           <h1 className="text-3xl font-bold text-gray-800 mb-3">No recent order</h1>
@@ -33,7 +41,7 @@ const OrderDoneView = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 pb-16">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -89,6 +97,11 @@ const OrderDoneView = () => {
           </div>
         </motion.div>
       </div>
+      <div className="fixed bottom-4 right-4 flex items-center gap-2 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-full shadow-lg text-xs text-gray-500">
+        <Volume2 className="w-3.5 h-3.5 text-emerald-600" />
+        Order confirmed
+      </div>
+      <audio ref={audioRef} src="/orderconfirm.mpeg" preload="auto" />
     </div>
   );
 };

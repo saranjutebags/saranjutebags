@@ -167,8 +167,8 @@ const CheckoutView = () => {
       grandTotal: pricing.grandTotal,
       total: pricing.grandTotal,
       paymentMethod: paymentMethod === 'cod' ? 'COD' : 'Online Payment',
-      status: 'Confirmed',
-      trackingStage: 'confirmed',
+      status: 'Pending',
+      trackingStage: 'pending',
       shippingAddress: {
         ...selectedAddress,
         email: user?.email || '',
@@ -185,7 +185,7 @@ const CheckoutView = () => {
 
   if (cart.length === 0 && !popup) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-24 sm:pt-28 pb-16 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16 flex items-center justify-center">
         <div className="text-center glass rounded-3xl p-12 border border-emerald-100 max-w-md mx-4">
           <CheckCircle2 className="w-16 h-16 text-emerald-600 mx-auto mb-4" />
           <h2 className="text-3xl font-bold text-gray-800 mb-4">Checkout is empty</h2>
@@ -199,7 +199,7 @@ const CheckoutView = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-24 sm:pt-28 pb-12">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-12">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
         <button
           onClick={() => navigate(-1)}

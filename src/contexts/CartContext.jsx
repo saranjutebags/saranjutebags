@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   coupons: 'saran-jute-coupons',
   latestOrder: 'saran-jute-latest-order',
   pricingSettings: 'saran-jute-pricing-settings',
+  allOrders: 'saran-jute-all-orders',
 };
 
 // Per-user storage keys (scoped by uid)
@@ -57,6 +58,7 @@ export const CartProvider = ({ children }) => {
     freeShippingThreshold: 999,
   }));
   const [cartToast, setCartToast] = useState(null);
+  const seededDefaults = useRef(false);
   const [coupons, setCoupons] = useState(() => readJson(STORAGE_KEYS.coupons, [
     { id: 'welcome10', code: 'WELCOME10', label: 'Welcome Offer', discount: '10% OFF', active: true, shouldPopup: true },
     { id: 'jute15', code: 'JUTE15', label: 'Bulk Bag Deal', discount: '15% OFF', active: false, shouldPopup: false },
@@ -67,7 +69,34 @@ export const CartProvider = ({ children }) => {
   const unsubOrdersRef = useRef(null);
   const unsubAddressesRef = useRef(null);
 
+  // Reduce order item images for Firestore (keep URL images, at most 1 base64 per item)
+  const sanitizeForFirestore = (obj) => {
+    if (Array.isArray(obj)) return obj.map(sanitizeForFirestore);
+    if (obj === null || typeof obj !== 'object') return obj;
+    const cleaned = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value === undefined || value === null) continue;
+      if (key === 'images' && Array.isArray(value)) {
+        const urls = value.filter(img => img && !img.startsWith('data:'));
+        cleaned.images = urls.length > 0 ? urls : (value.length > 0 ? [value[0]] : []);
+      } else if (key === 'selectedImage' && typeof value === 'string' && value.startsWith('data:')) {
+        const urls = (obj.images || []).filter(img => img && !img.startsWith('data:'));
+        cleaned.selectedImage = urls[0] || value;
+      } else {
+        cleaned[key] = sanitizeForFirestore(value);
+      }
+    }
+    return cleaned;
+  };
+
+  const orderSorter = (a, b) => {
+    const ta = new Date(a.createdAt || a.date).getTime() || 0;
+    const tb = new Date(b.createdAt || b.date).getTime() || 0;
+    return tb - ta;
+  };
+
   const syncLocalOrders = (nextOrders) => {
+    nextOrders.sort(orderSorter);
     setOrders(nextOrders);
     if (uid) writeJson(userStorageKey(uid, 'saran-jute-orders'), nextOrders);
   };
@@ -97,7 +126,13 @@ export const CartProvider = ({ children }) => {
     }
 
     // Load from local storage for this user while Firestore connects
-    setOrders(readJson(userStorageKey(uid, 'saran-jute-orders'), []));
+    let localOrders = readJson(userStorageKey(uid, 'saran-jute-orders'), []);
+    localOrders.sort((a, b) => {
+      const ta = new Date(a.createdAt || a.date).getTime() || 0;
+      const tb = new Date(b.createdAt || b.date).getTime() || 0;
+      return tb - ta;
+    });
+    setOrders(localOrders);
     setAddresses(readJson(userStorageKey(uid, 'saran-jute-addresses'), []));
     setLatestOrder(readJson(userStorageKey(uid, 'saran-jute-latest-order'), null));
 
@@ -110,10 +145,9 @@ export const CartProvider = ({ children }) => {
         const docs = [];
         snap.forEach(d => docs.push(d.data()));
         docs.sort((a, b) => {
-          // Sort by createdAt descending if available, else id
-          const ta = a.createdAt || a.id || '';
-          const tb = b.createdAt || b.id || '';
-          return tb.localeCompare(ta);
+          const ta = new Date(a.createdAt || a.date).getTime() || 0;
+          const tb = new Date(b.createdAt || b.date).getTime() || 0;
+          return tb - ta;
         });
         setOrders(docs);
         writeJson(userStorageKey(uid, 'saran-jute-orders'), docs);
@@ -150,7 +184,8 @@ export const CartProvider = ({ children }) => {
     if (!isFirebaseActive) return;
 
     const unsubCoupons = onSnapshot(collection(db, 'coupons'), (snap) => {
-      if (snap.empty) {
+      if (snap.empty && !seededDefaults.current) {
+        seededDefaults.current = true;
         const defaultCoupons = [
           { id: 'welcome10', code: 'WELCOME10', label: 'Welcome Offer', discount: '10% OFF', active: true, shouldPopup: true },
           { id: 'jute15', code: 'JUTE15', label: 'Bulk Bag Deal', discount: '15% OFF', active: false, shouldPopup: false },
@@ -311,7 +346,10 @@ export const CartProvider = ({ children }) => {
   };
 
   const addOrder = (order) => {
-    if (!uid) return;
+    if (!uid) {
+      console.warn('addOrder: user not authenticated (uid is null) — order not saved');
+      return;
+    }
 
     const nextOrder = {
       ...order,
@@ -333,29 +371,38 @@ export const CartProvider = ({ children }) => {
       },
       orderTimeline: order.orderTimeline || [
         { status: 'Placed', timestamp: order.date || new Date().toLocaleString(), note: 'Order placed by customer' },
-        { status: 'Confirmed', timestamp: order.date || new Date().toLocaleString(), note: 'Order confirmed automatically' },
       ],
       createdAt: new Date().toISOString(),
     };
 
     if (isFirebaseActive) {
+      const stripped = sanitizeForFirestore(nextOrder);
       // Save to user-scoped path so user sees only their orders
-      setDoc(doc(db, 'users', uid, 'orders', order.id), nextOrder).catch(() => {
+      setDoc(doc(db, 'users', uid, 'orders', order.id), stripped).catch(() => {
         const nextOrders = [nextOrder, ...orders.filter(item => item.id !== nextOrder.id)];
         syncLocalOrders(nextOrders);
       });
       // Also mirror to top-level orders collection for admin visibility
-      setDoc(doc(db, 'orders', order.id), nextOrder).catch(() => undefined);
+      setDoc(doc(db, 'orders', order.id), stripped).catch(err => console.error('Failed to mirror order to top-level collection:', err));
     } else {
       syncLocalOrders([nextOrder, ...orders.filter(item => item.id !== nextOrder.id)]);
+      // Also save to shared all-orders key so admin dashboard can see all orders
+      const allOrders = readJson(STORAGE_KEYS.allOrders, []);
+      const merged = [nextOrder, ...allOrders.filter(item => item.id !== nextOrder.id)];
+      merged.sort((a, b) => {
+        const ta = new Date(a.createdAt || a.date).getTime() || 0;
+        const tb = new Date(b.createdAt || b.date).getTime() || 0;
+        return tb - ta;
+      });
+      writeJson(STORAGE_KEYS.allOrders, merged);
     }
 
-    triggerOrderNotification(nextOrder, 'Confirmed');
-    sendOrderStatusEmail(nextOrder, 'Confirmed').catch(err => console.error('Email send error:', err));
+    triggerOrderNotification(nextOrder, nextOrder.status);
+    sendOrderStatusEmail(nextOrder, nextOrder.status).catch(err => console.error('Email send error:', err));
   };
 
-  const updateOrder = (orderId, updates) => {
-    const existing = orders.find(order => order.id === orderId);
+  const updateOrder = (orderId, updates, existingOrder = null) => {
+    const existing = existingOrder || orders.find(order => order.id === orderId);
     if (!existing) return;
 
     const newTimeline = [...(existing.orderTimeline || [])];
@@ -392,12 +439,13 @@ export const CartProvider = ({ children }) => {
     const orderUserId = existing.userId || uid;
 
     if (isFirebaseActive) {
+      const stripped = sanitizeForFirestore(nextOrder);
       // Update in user-scoped path
       if (orderUserId) {
-        setDoc(doc(db, 'users', orderUserId, 'orders', orderId), nextOrder).catch(() => undefined);
+        setDoc(doc(db, 'users', orderUserId, 'orders', orderId), stripped).catch(err => console.error('Failed to update user order:', err));
       }
       // Update in top-level admin collection
-      setDoc(doc(db, 'orders', orderId), nextOrder).catch(() => {
+      setDoc(doc(db, 'orders', orderId), stripped).catch(() => {
         if (uid) {
           const nextOrders = orders.map(o => o.id === orderId ? nextOrder : o);
           syncLocalOrders(nextOrders);
@@ -405,6 +453,9 @@ export const CartProvider = ({ children }) => {
       });
     } else {
       setOrders(prev => prev.map(o => o.id === orderId ? nextOrder : o));
+      // Also update the shared all-orders key
+      const allOrders = readJson(STORAGE_KEYS.allOrders, []);
+      writeJson(STORAGE_KEYS.allOrders, allOrders.map(o => o.id === orderId ? nextOrder : o));
     }
 
     setLatestOrder(prev => (prev && prev.id === orderId ? nextOrder : prev));
@@ -421,6 +472,22 @@ export const CartProvider = ({ children }) => {
       cancelReason,
       cancelledAt: new Date().toLocaleString(),
     });
+  };
+
+  const deleteOrders = (orderIds) => {
+    if (isFirebaseActive) {
+      orderIds.forEach(orderId => {
+        const existing = orders.find(o => o.id === orderId);
+        if (existing?.userId) {
+          deleteDoc(doc(db, 'users', existing.userId, 'orders', orderId)).catch(() => undefined);
+        }
+        deleteDoc(doc(db, 'orders', orderId)).catch(() => undefined);
+      });
+    } else {
+      setOrders(prev => prev.filter(o => !orderIds.includes(o.id)));
+      const allOrders = readJson(STORAGE_KEYS.allOrders, []);
+      writeJson(STORAGE_KEYS.allOrders, allOrders.filter(o => !orderIds.includes(o.id)));
+    }
   };
 
   // ─── Pricing ─────────────────────────────────────────────────────────────────
@@ -539,6 +606,7 @@ export const CartProvider = ({ children }) => {
     addOrder,
     updateOrder,
     cancelOrder,
+    deleteOrders,
     updatePricingSettings,
     calculateOrderPricing,
     setLatestOrderItem,

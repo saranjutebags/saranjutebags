@@ -31,8 +31,8 @@ const writeJson = (key, value) => {
   localStorage.setItem(key, JSON.stringify(value));
 };
 
-const createProductId = (items) => Math.max(0, ...items.map((item) => Number(item.id) || 0)) + 1;
-const createCategoryId = (items) => Math.max(0, ...items.map((item) => Number(item.id) || 0)) + 1;
+const createProductId = () => `prod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+const createCategoryId = () => `cat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
 export const useProducts = () => {
   const context = useContext(ProductContext);
@@ -133,10 +133,10 @@ export const ProductProvider = ({ children }) => {
   const getNewArrivals = () => products.filter((product) => product.newArrival && product.visible && !product.archived);
   const getProductsByCategory = (category) => products.filter((product) => product.category === category && product.visible && !product.archived);
 
-  const addProduct = (product) => {
+  const addProduct = async (product) => {
     const nextProduct = {
       ...product,
-      id: createProductId(products),
+      id: createProductId(),
       archived: false,
       visible: true,
       featured: Boolean(product.featured),
@@ -151,33 +151,46 @@ export const ProductProvider = ({ children }) => {
     };
 
     if (isFirebaseActive) {
-      setDoc(doc(db, 'products', String(nextProduct.id)), nextProduct).catch(() => {
-        setProducts((prev) => [nextProduct, ...prev]);
-      });
-    } else {
-      setProducts((prev) => [nextProduct, ...prev]);
+      try {
+        await setDoc(doc(db, 'products', String(nextProduct.id)), nextProduct);
+      } catch (err) {
+        const cached = readJson(STORAGE_KEYS.products, []);
+        writeJson(STORAGE_KEYS.products, [nextProduct, ...cached.filter(p => p.id !== nextProduct.id)]);
+        setProducts((prev) => prev.some(p => p.id === nextProduct.id) ? prev : [nextProduct, ...prev]);
+      }
+      return nextProduct;
     }
+    setProducts((prev) => prev.some(p => p.id === nextProduct.id) ? prev : [nextProduct, ...prev]);
     return nextProduct;
   };
 
-  const updateProduct = (productId, updates) => {
+  const updateProduct = async (productId, updates) => {
     if (isFirebaseActive) {
       const existing = products.find((product) => String(product.id) === String(productId));
       if (existing) {
-        setDoc(doc(db, 'products', String(productId)), { ...existing, ...updates }).catch(() => {
-          setProducts((prev) => prev.map((p) => String(p.id) === String(productId) ? { ...p, ...updates } : p));
-        });
+        try {
+          await setDoc(doc(db, 'products', String(productId)), { ...existing, ...updates });
+        } catch (err) {
+          const updated = { ...existing, ...updates };
+          const cached = readJson(STORAGE_KEYS.products, []);
+          writeJson(STORAGE_KEYS.products, cached.map(p => String(p.id) === String(productId) ? updated : p));
+          setProducts((prev) => prev.map((p) => String(p.id) === String(productId) ? updated : p));
+        }
       }
     } else {
       setProducts((prev) => prev.map((product) => String(product.id) === String(productId) ? { ...product, ...updates } : product));
     }
   };
 
-  const deleteProduct = (productId) => {
+  const deleteProduct = async (productId) => {
     if (isFirebaseActive) {
-      deleteDoc(doc(db, 'products', String(productId))).catch(() => {
+      try {
+        await deleteDoc(doc(db, 'products', String(productId)));
+      } catch (err) {
+        const cached = readJson(STORAGE_KEYS.products, []);
+        writeJson(STORAGE_KEYS.products, cached.filter(p => String(p.id) !== String(productId)));
         setProducts((prev) => prev.filter((p) => String(p.id) !== String(productId)));
-      });
+      }
     } else {
       setProducts((prev) => prev.filter((product) => String(product.id) !== String(productId)));
     }
@@ -189,7 +202,7 @@ export const ProductProvider = ({ children }) => {
 
     const copy = {
       ...source,
-      id: createProductId(products),
+      id: createProductId(),
       name: `${source.name} Copy`,
       sku: `${source.sku || 'SKU'}-COPY`,
       barcode: `${source.barcode || 'BAR'}-COPY`,
@@ -290,42 +303,51 @@ export const ProductProvider = ({ children }) => {
     });
   };
 
-  const addCategory = (category) => {
+  const addCategory = async (category) => {
     const nextCategory = {
       ...category,
-      id: createCategoryId(categories),
+      id: createCategoryId(),
       visible: true,
       featured: Boolean(category.featured),
       sortOrder: Number(category.sortOrder) || categories.length + 1,
     };
     if (isFirebaseActive) {
-      setDoc(doc(db, 'categories', String(nextCategory.id)), nextCategory).catch(() => {
-        setCategories((prev) => [nextCategory, ...prev]);
-      });
-    } else {
-      setCategories((prev) => [nextCategory, ...prev]);
+      try {
+        await setDoc(doc(db, 'categories', String(nextCategory.id)), nextCategory);
+      } catch (err) {
+        setCategories((prev) => prev.some(c => c.id === nextCategory.id) ? prev : [nextCategory, ...prev]);
+        throw err;
+      }
+      return nextCategory;
     }
+    setCategories((prev) => prev.some(c => c.id === nextCategory.id) ? prev : [nextCategory, ...prev]);
     return nextCategory;
   };
 
-  const updateCategory = (categoryId, updates) => {
+  const updateCategory = async (categoryId, updates) => {
     if (isFirebaseActive) {
       const existing = categories.find((c) => c.id === categoryId);
       if (existing) {
-        setDoc(doc(db, 'categories', String(categoryId)), { ...existing, ...updates }).catch(() => {
+        try {
+          await setDoc(doc(db, 'categories', String(categoryId)), { ...existing, ...updates });
+        } catch (err) {
           setCategories((prev) => prev.map((c) => c.id === categoryId ? { ...c, ...updates } : c));
-        });
+          throw err;
+        }
       }
     } else {
       setCategories((prev) => prev.map((category) => (category.id === categoryId ? { ...category, ...updates } : category)));
     }
   };
 
-  const deleteCategory = (categoryId) => {
+  const deleteCategory = async (categoryId) => {
     if (isFirebaseActive) {
-      deleteDoc(doc(db, 'categories', String(categoryId))).catch(() => {
+      try {
+        await deleteDoc(doc(db, 'categories', String(categoryId)));
+      } catch (err) {
         setCategories((prev) => prev.filter((c) => c.id !== categoryId));
-      });
+        throw err;
+      }
     } else {
       setCategories((prev) => prev.filter((category) => category.id !== categoryId));
     }
@@ -346,6 +368,8 @@ export const ProductProvider = ({ children }) => {
         name: reviewData.name || 'Anonymous',
         rating: reviewData.rating,
         text: reviewData.text,
+        images: reviewData.images || [],
+        hidden: false,
         date: new Date().toLocaleDateString()
       };
 
@@ -358,6 +382,33 @@ export const ProductProvider = ({ children }) => {
         rating: avgRating,
         reviews: reviewCount
       });
+    }
+  };
+
+  const deleteProductReview = (productId, reviewId) => {
+    const product = products.find(p => String(p.id) === String(productId));
+    if (product) {
+      const updatedReviews = (product.customerReviews || []).filter(r => r.id !== reviewId);
+      const avgRating = updatedReviews.length > 0
+        ? updatedReviews.reduce((sum, r) => sum + r.rating, 0) / updatedReviews.length
+        : 0;
+      const reviewCount = Math.max(0, (product.reviews || 0) - 1);
+
+      updateProduct(productId, {
+        customerReviews: updatedReviews,
+        rating: avgRating,
+        reviews: reviewCount
+      });
+    }
+  };
+
+  const toggleReviewVisibility = (productId, reviewId) => {
+    const product = products.find(p => String(p.id) === String(productId));
+    if (product) {
+      const updatedReviews = (product.customerReviews || []).map(r =>
+        r.id === reviewId ? { ...r, hidden: !r.hidden } : r
+      );
+      updateProduct(productId, { customerReviews: updatedReviews });
     }
   };
 
@@ -385,6 +436,8 @@ export const ProductProvider = ({ children }) => {
     deleteCategory,
     toggleCategoryVisibility,
     addReview,
+    deleteProductReview,
+    toggleReviewVisibility,
   }), [categories, products, inventoryHistory, loading]);
 
   return <ProductContext.Provider value={value}>{children}</ProductContext.Provider>;

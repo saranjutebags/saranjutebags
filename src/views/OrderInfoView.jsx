@@ -4,15 +4,18 @@ import { AlertTriangle, ArrowLeft, MapPin, ShoppingBag, Truck, X, Download, Eye 
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 import { useAdmin } from '../contexts/AdminContext';
+import { useProducts } from '../contexts/ProductContext';
+import { getItemImage } from '../utils/orderImageUtils';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 
 const trackingSteps = [
-  { key: 'confirmed', label: 'Confirmed', gif: '/confirmed.gif' },
-  { key: 'packed', label: 'Packed', gif: '/packed.gif' },
-  { key: 'shipped', label: 'Shipped', gif: '/shipped.gif' },
-  { key: 'ontheway', label: 'On the way', gif: '/ontheway.gif' },
-  { key: 'delivered', label: 'Delivered', gif: '/delivered.gif' },
+  { key: 'pending', label: 'Pending', desc: 'Order is awaiting confirmation', gif: '/confirmed.gif' },
+  { key: 'confirmed', label: 'Confirmed', desc: 'Your order has been confirmed', gif: '/confirmed.gif' },
+  { key: 'packed', label: 'Packed', desc: 'Items packed and ready for dispatch', gif: '/packed.gif' },
+  { key: 'shipped', label: 'Shipped', desc: 'Items handed over to courier', gif: '/shipped.gif' },
+  { key: 'ontheway', label: 'On the way', desc: 'Your order is on its way to you', gif: '/ontheway.gif' },
+  { key: 'delivered', label: 'Delivered', desc: 'Your order has been delivered', gif: '/delivered.gif' },
 ];
 
 const cancelReasons = [
@@ -23,11 +26,15 @@ const cancelReasons = [
   'Other',
 ];
 
-const canCancelOrder = (order) => (order.status || '').toLowerCase() === 'confirmed';
+const canCancelOrder = (order) => {
+  const s = (order.status || '').toLowerCase();
+  return s === 'pending' || s === 'confirmed';
+};
 
 const getTrackingStageIndex = (order) => {
   const status = (order.status || '').toLowerCase();
   const statusMap = {
+    'pending': 'pending',
     'confirmed': 'confirmed',
     'packed': 'packed',
     'shipped': 'shipped',
@@ -35,7 +42,7 @@ const getTrackingStageIndex = (order) => {
     'ontheway': 'ontheway',
     'delivered': 'delivered',
   };
-  const stage = statusMap[status] || 'confirmed';
+  const stage = statusMap[status] || 'pending';
   return trackingSteps.findIndex((step) => step.key === stage);
 };
 
@@ -44,6 +51,7 @@ const OrderInfoView = () => {
   const navigate = useNavigate();
   const { orders, cancelOrder } = useCart();
   const { companySettings } = useAdmin();
+  const { products } = useProducts();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState(cancelReasons[0]);
   const [otherReason, setOtherReason] = useState('');
@@ -53,7 +61,7 @@ const OrderInfoView = () => {
 
   if (!order) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 pb-16 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16 flex items-center justify-center">
         <div className="glass rounded-3xl p-10 border border-emerald-100 text-center max-w-md mx-4">
           <ShoppingBag className="w-16 h-16 text-emerald-600 mx-auto mb-4" />
           <h1 className="text-3xl font-bold text-gray-800 mb-3">Order not found</h1>
@@ -215,7 +223,7 @@ const OrderInfoView = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 pb-16">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <button onClick={() => navigate('/orders')} className="flex items-center gap-2 text-gray-600 hover:text-emerald-600 mb-8 transition-colors">
           <ArrowLeft className="w-5 h-5" />
@@ -359,8 +367,11 @@ const OrderInfoView = () => {
                         {/* Label */}
                         <div className={`pb-6 pt-1.5 ${active ? 'text-emerald-700' : 'text-gray-400'}`}>
                           <p className="text-sm font-semibold leading-tight">{step.label}</p>
-                          {index === currentStageIndex && order.status !== 'Cancelled' && (
-                            <p className="text-xs text-emerald-500 mt-0.5">Current stage</p>
+                          {index <= currentStageIndex && order.status !== 'Cancelled' && (
+                            <p className="text-xs mt-0.5">{step.desc}</p>
+                          )}
+                          {index < currentStageIndex && (
+                            <p className="text-xs text-emerald-400 mt-0.5">Completed</p>
                           )}
                         </div>
                       </div>
@@ -384,7 +395,7 @@ const OrderInfoView = () => {
               <div className="space-y-4">
                 {order.items.map((item) => (
                   <div key={item.id} className="flex items-center gap-4 rounded-2xl border border-gray-100 p-4">
-                    <img src={item.images?.[0]} alt={item.name} className="w-20 h-20 object-contain rounded-2xl bg-emerald-50 border border-emerald-100" />
+                    <img src={getItemImage(item, products)} alt={item.name} className="w-20 h-20 object-contain rounded-2xl bg-emerald-50 border border-emerald-100" />
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-gray-800">{item.name}</p>
                       <p className="text-sm text-gray-500">Qty: {item.quantity} • ₹{item.price} each</p>

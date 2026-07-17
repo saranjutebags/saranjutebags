@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   notifications: 'saran-jute-notifications',
   security: 'saran-jute-security-settings',
   roles: 'saran-jute-admin-roles',
+  scrollingTexts: 'saran-jute-scrolling-texts',
 };
 
 const readJson = (key, fallback) => {
@@ -72,7 +73,7 @@ const defaultPopups = [
     autoCloseTimer: 0,
     showOnce: true,
     closeButton: true,
-    active: true,
+    active: false,
   },
 ];
 
@@ -105,7 +106,12 @@ const defaultReviews = [
 ];
 
 const defaultNotifications = [
-  { id: 'note-1', title: 'Welcome Offer', type: 'Offer', message: 'Use WELCOME10 for 10% off.', active: true },
+  { id: 'note-1', title: 'Welcome Offer', type: 'Offer', message: 'Use WELCOME10 for 10% off.', active: false },
+];
+
+const defaultScrollingTexts = [
+  { id: 'scroll-1', text: 'Free shipping on orders above ₹999', active: true },
+  { id: 'scroll-2', text: 'Use code WELCOME10 for 10% off', active: true },
 ];
 
 const defaultSecurity = {
@@ -144,13 +150,14 @@ export const AdminProvider = ({ children }) => {
   const [notifications, setNotifications] = useState(() => readJson(STORAGE_KEYS.notifications, defaultNotifications));
   const [security, setSecurity] = useState(() => readJson(STORAGE_KEYS.security, defaultSecurity));
   const [roles, setRoles] = useState(() => readJson(STORAGE_KEYS.roles, defaultRoles));
+  const [scrollingTexts, setScrollingTexts] = useState(() => readJson(STORAGE_KEYS.scrollingTexts, defaultScrollingTexts));
   const [activityLogs, setActivityLogs] = useState(() => readJson('saran-jute-activity-logs', [
     { id: 'log-1', timestamp: new Date(Date.now() - 3600000).toLocaleString(), action: 'Admin panel initialized', user: 'system' },
-    { id: 'log-2', timestamp: new Date().toLocaleString(), action: 'Security settings updated', user: 'admin@gmail.com' }
+    { id: 'log-2', timestamp: new Date().toLocaleString(), action: 'Security settings updated', user: 'saranjutebags@gmail.com' }
   ]));
   const [loginHistory, setLoginHistory] = useState(() => readJson('saran-jute-login-history', [
-    { id: 'lh-1', timestamp: new Date(Date.now() - 7200000).toLocaleString(), email: 'admin@gmail.com', status: 'Success', device: 'Chrome on Windows' },
-    { id: 'lh-2', timestamp: new Date().toLocaleString(), email: 'admin@gmail.com', status: 'Success', device: 'Chrome on Windows' }
+    { id: 'lh-1', timestamp: new Date(Date.now() - 7200000).toLocaleString(), email: 'saranjutebags@gmail.com', status: 'Success', device: 'Chrome on Windows' },
+    { id: 'lh-2', timestamp: new Date().toLocaleString(), email: 'saranjutebags@gmail.com', status: 'Success', device: 'Chrome on Windows' }
   ]));
   const [deviceHistory, setDeviceHistory] = useState(() => readJson('saran-jute-device-history', [
     { id: 'dev-1', lastLogin: new Date().toLocaleString(), device: 'Chrome on Windows', ip: '127.0.0.1', active: true }
@@ -233,6 +240,16 @@ export const AdminProvider = ({ children }) => {
       }
     });
 
+    const unsubScrollingTexts = onSnapshot(collection(db, 'scrollingTexts'), (snap) => {
+      if (snap.empty) {
+        defaultScrollingTexts.forEach(t => setDoc(doc(db, 'scrollingTexts', t.id), t));
+      } else {
+        const docs = [];
+        snap.forEach(d => docs.push(d.data()));
+        setScrollingTexts(docs);
+      }
+    });
+
     return () => {
       unsubCompany();
       unsubHomepage();
@@ -242,6 +259,7 @@ export const AdminProvider = ({ children }) => {
       unsubReviews();
       unsubNotifications();
       unsubLogs();
+      unsubScrollingTexts();
     };
   }, []);
 
@@ -288,21 +306,25 @@ export const AdminProvider = ({ children }) => {
   }, [security]);
 
   useEffect(() => writeJson(STORAGE_KEYS.roles, roles), [roles]);
+  useEffect(() => {
+    if (!isFirebaseActive) {
+      writeJson(STORAGE_KEYS.scrollingTexts, scrollingTexts);
+    }
+  }, [scrollingTexts]);
   useEffect(() => writeJson('saran-jute-activity-logs', activityLogs), [activityLogs]);
   useEffect(() => writeJson('saran-jute-login-history', loginHistory), [loginHistory]);
   useEffect(() => writeJson('saran-jute-device-history', deviceHistory), [deviceHistory]);
 
-  const addActivityLog = (action, userEmail = 'admin@gmail.com') => {
+  const addActivityLog = (action, userEmail = 'saranjutebags@gmail.com') => {
     const newLog = {
       id: `log-${Date.now()}`,
       timestamp: new Date().toLocaleString(),
       action,
       user: userEmail,
     };
+    setActivityLogs((prev) => [newLog, ...prev]);
     if (isFirebaseActive) {
-      setDoc(doc(db, 'activityLogs', newLog.id), newLog);
-    } else {
-      setActivityLogs((prev) => [newLog, ...prev]);
+      setDoc(doc(db, 'activityLogs', newLog.id), newLog).catch(err => console.error('Failed to save activity log:', err));
     }
   };
 
@@ -485,6 +507,38 @@ export const AdminProvider = ({ children }) => {
     addActivityLog('Updated role permissions');
   };
 
+  const addScrollingText = (text) => {
+    const id = `scroll-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+    const newItem = { id, text, active: true };
+    if (isFirebaseActive) {
+      setDoc(doc(db, 'scrollingTexts', id), newItem);
+    } else {
+      setScrollingTexts((prev) => [...prev, newItem]);
+    }
+    addActivityLog('Added scrolling text');
+  };
+
+  const updateScrollingText = (textId, updates) => {
+    if (isFirebaseActive) {
+      const existing = scrollingTexts.find(t => t.id === textId);
+      if (existing) {
+        setDoc(doc(db, 'scrollingTexts', textId), { ...existing, ...updates });
+      }
+    } else {
+      setScrollingTexts((prev) => prev.map((t) => (t.id === textId ? { ...t, ...updates } : t)));
+    }
+    addActivityLog('Updated scrolling text');
+  };
+
+  const deleteScrollingText = (textId) => {
+    if (isFirebaseActive) {
+      deleteDoc(doc(db, 'scrollingTexts', textId));
+    } else {
+      setScrollingTexts((prev) => prev.filter((t) => t.id !== textId));
+    }
+    addActivityLog('Deleted scrolling text');
+  };
+
   const value = useMemo(() => ({
     companySettings,
     homepage,
@@ -515,7 +569,11 @@ export const AdminProvider = ({ children }) => {
     deleteNotification,
     updateSecurity,
     updateRole,
-  }), [banners, companySettings, homepage, notifications, popups, reviews, roles, security, activityLogs, loginHistory, deviceHistory]);
+    scrollingTexts,
+    addScrollingText,
+    updateScrollingText,
+    deleteScrollingText,
+  }), [banners, companySettings, homepage, notifications, popups, reviews, roles, security, activityLogs, loginHistory, deviceHistory, scrollingTexts]);
 
   return <AdminContext.Provider value={value}>{children}</AdminContext.Provider>;
 };

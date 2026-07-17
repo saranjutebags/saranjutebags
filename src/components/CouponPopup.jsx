@@ -142,7 +142,7 @@ const CouponPopup = () => {
               onClick={() => handleDismiss(popup.id, popup.showOnce)}
               className="w-full text-center text-xs text-gray-400 mt-3 hover:text-gray-600 transition-colors"
             >
-              No thanks, skip offer
+              Skip it..
             </button>
           </div>
         </motion.div>

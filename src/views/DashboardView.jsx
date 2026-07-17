@@ -1083,7 +1083,11 @@ const DashboardView = () => {
                   <p className="font-semibold text-gray-800">{order.id}</p>
                   <p className="text-xs text-gray-500">{order.shippingAddress?.name} • {order.date}</p>
                 </div>
-                <span className="text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">{order.status}</span>
+                <span className={`text-xs px-2 py-1 rounded-full ${
+  order.status === 'Cancelled' ? 'bg-red-100 text-red-700' :
+  order.status === 'Delivered' ? 'bg-green-100 text-green-700' :
+  'bg-orange-100 text-orange-700'
+}`}>{order.status}</span>
               </div>
             </button>
           ))}
@@ -1702,7 +1706,7 @@ const DashboardView = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-24 pb-16">
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col xl:flex-row gap-6">
           <aside className="xl:w-80 glass rounded-3xl border border-emerald-100 p-5 h-fit xl:sticky xl:top-24">

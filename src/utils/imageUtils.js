@@ -19,14 +19,9 @@ export const convertMultipleFilesToBase64 = async (files) => {
 
 export const validateImageFile = (file) => {
   const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'];
-  const maxSize = 5 * 1024 * 1024; // 5MB
 
   if (!validTypes.includes(file.type)) {
     return { valid: false, error: 'Invalid file type. Please upload JPEG, PNG, WebP, GIF, or SVG.' };
-  }
-
-  if (file.size > maxSize) {
-    return { valid: false, error: 'File size exceeds 5MB limit.' };
   }
 
   return { valid: true };

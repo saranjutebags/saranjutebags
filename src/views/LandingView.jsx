@@ -14,11 +14,7 @@ const branches = [
     address: '12-2-826/A/21, Priyanka College Lane, LIC Colony, Hyderabad, Telangana 500028',
     mapLink: 'https://maps.app.goo.gl/dUEb8NMfGW98KdEf8',
   },
-  {
-    name: 'Secunderabad',
-    address: 'Shop No 1, 4-5, Mahatma Gandhi Rd, Kandoji Bazar, Secunderabad, Telangana 500003',
-    mapLink: 'https://maps.app.goo.gl/VpQb2iRUEUefj1fs5',
-  },
+
   {
     name: 'Vijayawada, Andhra Pradesh',
     address: '40-5-5/3, Sri Natrajan Guljar Rd, Brindavan Colony, Vijayawada, Andhra Pradesh 520010',
@@ -45,7 +41,7 @@ const LandingView = () => {
   const visibleCategories = categories.filter(c => c.visible !== false);
 
   return (
-    <div className="pt-16 sm:pt-20">
+    <div className="pt-32 sm:pt-36">
 
       {/* ── Hero ──────────────────────────────────────────────────── */}
       <section className="relative min-h-[90vh] flex items-center overflow-hidden">
@@ -77,9 +73,9 @@ const LandingView = () => {
               </div>
             </motion.div>
 
-            <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.4, duration: 0.8 }} className="relative hidden lg:block">
+            <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.4, duration: 0.8 }} className="relative">
               <div className="absolute -inset-8 bg-white/10 rounded-3xl blur-2xl" />
-              <div className="relative rounded-3xl overflow-hidden h-80">
+              <div className="relative rounded-3xl overflow-hidden h-64 sm:h-72 lg:h-80">
                 <HomeSlideshow height="h-full" />
               </div>
             </motion.div>
@@ -339,7 +335,7 @@ const LandingView = () => {
             <h2 className="text-3xl md:text-4xl font-bold text-gradient mb-4">Our Branches</h2>
             <p className="text-gray-600">Visit us at our locations</p>
           </div>
-          <div className="grid md:grid-cols-3 gap-6">
+          <div className="grid md:grid-cols-2 gap-6 justify-center">
             {branches.map((branch, index) => (
               <motion.div
                 key={branch.name}
@@ -406,14 +402,18 @@ const LandingView = () => {
             <div>
               <h4 className="font-bold mb-4">Contact</h4>
               <ul className="space-y-3 text-sm">
-                <li className="flex items-start gap-2 text-gray-400"><MapPin className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" /><span>Hyderabad, Telangana, India</span></li>
-                <li className="flex items-center gap-2 text-gray-400"><Phone className="w-4 h-4 text-emerald-500" /><span>+91 XXXXXXXXXX</span></li>
-                <li className="flex items-center gap-2 text-gray-400"><Mail className="w-4 h-4 text-emerald-500" /><span>info@saranjutebags.co.in</span></li>
+                <li className="flex items-start gap-2 text-gray-400"><MapPin className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" /><span>12-2-420/14 Alapati Nagar Road, Gudi Malkapur, Mehdipatnam, Hyderabad, Telangana 500028</span></li>
+                <li className="flex items-center gap-2 text-gray-400"><Phone className="w-4 h-4 text-emerald-500 shrink-0" /><span>+91 9866027027 / +91 9701000234</span></li>
+                <li className="flex items-center gap-2 text-gray-400"><Mail className="w-4 h-4 text-emerald-500 shrink-0" /><span>saranjutebags@gmail.com</span></li>
               </ul>
             </div>
           </div>
           <div className="border-t border-gray-800 pt-6 flex flex-col md:flex-row items-center justify-between gap-3">
-            <p className="text-gray-500 text-sm">&copy; 2025 Saran Jute Bags. All rights reserved.</p>
+            <p className="text-gray-500 text-sm">&copy; 2026 Saran Jute Bags. All rights reserved.</p>
+            <div className="flex gap-4 text-sm">
+              <Link to="/privacy" className="text-gray-400 hover:text-emerald-400 transition-colors">Privacy Policy</Link>
+              <Link to="/terms" className="text-gray-400 hover:text-emerald-400 transition-colors">Terms of Service</Link>
+            </div>
             <p className="text-gray-500 text-sm">
               Developed by <a href="https://csytech.vercel.app" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300">@Csy Tech Solutions</a>
             </p>
