@@ -98,12 +98,10 @@ export const CartProvider = ({ children }) => {
   const syncLocalOrders = (nextOrders) => {
     nextOrders.sort(orderSorter);
     setOrders(nextOrders);
-    if (uid) writeJson(userStorageKey(uid, 'saran-jute-orders'), nextOrders);
   };
 
   const syncLocalAddresses = (nextAddresses) => {
     setAddresses(nextAddresses);
-    if (uid) writeJson(userStorageKey(uid, 'saran-jute-addresses'), nextAddresses);
   };
 
   const syncLocalCoupons = (nextCoupons) => {
@@ -125,23 +123,18 @@ export const CartProvider = ({ children }) => {
       return;
     }
 
-    // Load from local storage for this user while Firestore connects
-    let localOrders = readJson(userStorageKey(uid, 'saran-jute-orders'), []);
-    localOrders.sort((a, b) => {
-      const ta = new Date(a.createdAt || a.date).getTime() || 0;
-      const tb = new Date(b.createdAt || b.date).getTime() || 0;
-      return tb - ta;
-    });
-    setOrders(localOrders);
-    setAddresses(readJson(userStorageKey(uid, 'saran-jute-addresses'), []));
-    setLatestOrder(readJson(userStorageKey(uid, 'saran-jute-latest-order'), null));
+    setOrders([]);
+    setAddresses([]);
+    setLatestOrder(null);
 
     if (!isFirebaseActive) return;
 
     // Subscribe to user-scoped orders: users/{uid}/orders
     unsubOrdersRef.current = onSnapshot(
       collection(db, 'users', uid, 'orders'),
+      { includeMetadataChanges: true },
       (snap) => {
+        if (snap.metadata.fromCache) return;
         const docs = [];
         snap.forEach(d => docs.push(d.data()));
         docs.sort((a, b) => {
@@ -150,26 +143,24 @@ export const CartProvider = ({ children }) => {
           return tb - ta;
         });
         setOrders(docs);
-        writeJson(userStorageKey(uid, 'saran-jute-orders'), docs);
       },
-      (error) => {
-        console.warn('Orders sync unavailable; using local fallback.', error?.message || error);
-        setOrders(readJson(userStorageKey(uid, 'saran-jute-orders'), []));
+      () => {
+        setOrders([]);
       }
     );
 
     // Subscribe to user-scoped addresses: users/{uid}/addresses
     unsubAddressesRef.current = onSnapshot(
       collection(db, 'users', uid, 'addresses'),
+      { includeMetadataChanges: true },
       (snap) => {
+        if (snap.metadata.fromCache) return;
         const docs = [];
         snap.forEach(d => docs.push(d.data()));
         setAddresses(docs);
-        writeJson(userStorageKey(uid, 'saran-jute-addresses'), docs);
       },
-      (error) => {
-        console.warn('Addresses sync unavailable; using local fallback.', error?.message || error);
-        setAddresses(readJson(userStorageKey(uid, 'saran-jute-addresses'), []));
+      () => {
+        setAddresses([]);
       }
     );
 
@@ -230,11 +221,7 @@ export const CartProvider = ({ children }) => {
   useEffect(() => { writeJson(STORAGE_KEYS.cart, cart); }, [cart]);
   useEffect(() => { writeJson(STORAGE_KEYS.wishlist, wishlist); }, [wishlist]);
 
-  useEffect(() => {
-    if (latestOrder && uid) {
-      writeJson(userStorageKey(uid, 'saran-jute-latest-order'), latestOrder);
-    }
-  }, [latestOrder, uid]);
+  // latestOrder is Firebase-only — no localStorage cache
 
   useEffect(() => {
     if (!isFirebaseActive) {
@@ -345,7 +332,7 @@ export const CartProvider = ({ children }) => {
     sendOrderStatusNotification(order, status).catch(err => console.error('OneSignal Notification error:', err));
   };
 
-  const addOrder = (order) => {
+  const addOrder = async (order) => {
     if (!uid) {
       console.warn('addOrder: user not authenticated (uid is null) — order not saved');
       return;
@@ -377,31 +364,15 @@ export const CartProvider = ({ children }) => {
 
     if (isFirebaseActive) {
       const stripped = sanitizeForFirestore(nextOrder);
-      // Save to user-scoped path so user sees only their orders
-      setDoc(doc(db, 'users', uid, 'orders', order.id), stripped).catch(() => {
-        const nextOrders = [nextOrder, ...orders.filter(item => item.id !== nextOrder.id)];
-        syncLocalOrders(nextOrders);
-      });
-      // Also mirror to top-level orders collection for admin visibility
-      setDoc(doc(db, 'orders', order.id), stripped).catch(err => console.error('Failed to mirror order to top-level collection:', err));
-    } else {
-      syncLocalOrders([nextOrder, ...orders.filter(item => item.id !== nextOrder.id)]);
-      // Also save to shared all-orders key so admin dashboard can see all orders
-      const allOrders = readJson(STORAGE_KEYS.allOrders, []);
-      const merged = [nextOrder, ...allOrders.filter(item => item.id !== nextOrder.id)];
-      merged.sort((a, b) => {
-        const ta = new Date(a.createdAt || a.date).getTime() || 0;
-        const tb = new Date(b.createdAt || b.date).getTime() || 0;
-        return tb - ta;
-      });
-      writeJson(STORAGE_KEYS.allOrders, merged);
+      await setDoc(doc(db, 'users', uid, 'orders', order.id), stripped);
+      await setDoc(doc(db, 'orders', order.id), stripped).catch(err => console.error('Failed to mirror order to top-level collection:', err));
     }
 
     triggerOrderNotification(nextOrder, nextOrder.status);
     sendOrderStatusEmail(nextOrder, nextOrder.status).catch(err => console.error('Email send error:', err));
   };
 
-  const updateOrder = (orderId, updates, existingOrder = null) => {
+  const updateOrder = async (orderId, updates, existingOrder = null) => {
     const existing = existingOrder || orders.find(order => order.id === orderId);
     if (!existing) return;
 
@@ -440,22 +411,10 @@ export const CartProvider = ({ children }) => {
 
     if (isFirebaseActive) {
       const stripped = sanitizeForFirestore(nextOrder);
-      // Update in user-scoped path
       if (orderUserId) {
-        setDoc(doc(db, 'users', orderUserId, 'orders', orderId), stripped).catch(err => console.error('Failed to update user order:', err));
+        await setDoc(doc(db, 'users', orderUserId, 'orders', orderId), stripped).catch(err => console.error('Failed to update user order:', err));
       }
-      // Update in top-level admin collection
-      setDoc(doc(db, 'orders', orderId), stripped).catch(() => {
-        if (uid) {
-          const nextOrders = orders.map(o => o.id === orderId ? nextOrder : o);
-          syncLocalOrders(nextOrders);
-        }
-      });
-    } else {
-      setOrders(prev => prev.map(o => o.id === orderId ? nextOrder : o));
-      // Also update the shared all-orders key
-      const allOrders = readJson(STORAGE_KEYS.allOrders, []);
-      writeJson(STORAGE_KEYS.allOrders, allOrders.map(o => o.id === orderId ? nextOrder : o));
+      await setDoc(doc(db, 'orders', orderId), stripped);
     }
 
     setLatestOrder(prev => (prev && prev.id === orderId ? nextOrder : prev));
@@ -466,27 +425,23 @@ export const CartProvider = ({ children }) => {
     }
   };
 
-  const cancelOrder = (orderId, cancelReason) => {
-    updateOrder(orderId, {
+  const cancelOrder = async (orderId, cancelReason) => {
+    await updateOrder(orderId, {
       status: 'Cancelled',
       cancelReason,
       cancelledAt: new Date().toLocaleString(),
     });
   };
 
-  const deleteOrders = (orderIds) => {
+  const deleteOrders = async (orderIds) => {
     if (isFirebaseActive) {
-      orderIds.forEach(orderId => {
+      for (const orderId of orderIds) {
         const existing = orders.find(o => o.id === orderId);
         if (existing?.userId) {
           deleteDoc(doc(db, 'users', existing.userId, 'orders', orderId)).catch(() => undefined);
         }
-        deleteDoc(doc(db, 'orders', orderId)).catch(() => undefined);
-      });
-    } else {
-      setOrders(prev => prev.filter(o => !orderIds.includes(o.id)));
-      const allOrders = readJson(STORAGE_KEYS.allOrders, []);
-      writeJson(STORAGE_KEYS.allOrders, allOrders.filter(o => !orderIds.includes(o.id)));
+        await deleteDoc(doc(db, 'orders', orderId));
+      }
     }
   };
 

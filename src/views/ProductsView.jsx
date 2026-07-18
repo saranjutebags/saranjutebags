@@ -169,6 +169,11 @@ const ProductsView = () => {
                       -{product.discountPercentage}%
                     </span>
                   )}
+                  {product.stock !== undefined && product.stock <= 5 && (
+                    <span className={`absolute top-3 ${product.discountPercentage > 0 ? 'right-3' : 'right-3'} ${product.stock <= 0 ? 'bg-red-500' : 'bg-amber-500'} text-white text-[10px] font-bold px-2 py-1 rounded-full`}>
+                      {product.stock <= 0 ? 'Out of Stock' : `Only ${product.stock} left`}
+                    </span>
+                  )}
                 </div>
 
                 {/* Details */}

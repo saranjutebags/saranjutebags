@@ -4,9 +4,27 @@ import { Edit3, Home, MapPin, Plus, Trash2, CheckCircle2, ShoppingBag } from 'lu
 import { useAuth } from '../contexts/AuthContext';
 import { useCart } from '../contexts/CartContext';
 
+const countries = [
+  { code: '+91', label: 'India (+91)' },
+  { code: '+1', label: 'USA / Canada (+1)' },
+  { code: '+44', label: 'United Kingdom (+44)' },
+  { code: '+61', label: 'Australia (+61)' },
+  { code: '+971', label: 'UAE (+971)' },
+  { code: '+65', label: 'Singapore (+65)' },
+  { code: '+60', label: 'Malaysia (+60)' },
+];
+
+const detectCountryCode = (phone = '') => {
+  for (const c of countries) {
+    if (phone.startsWith(c.code)) return { code: c.code, local: phone.slice(c.code.length) };
+  }
+  return { code: '+91', local: phone };
+};
+
 const emptyAddress = {
   name: '',
   phone: '',
+  countryCode: '+91',
   addressLine1: '',
   addressLine2: '',
   city: '',
@@ -26,13 +44,22 @@ const ProfileView = () => {
     phone: userData?.phone || '',
   }));
   const [addressForm, setAddressForm] = useState(emptyAddress);
+  const [editingAddressId, setEditingAddressId] = useState(null);
 
   const defaultAddress = useMemo(() => addresses.find(address => address.isDefault) || addresses[0] || null, [addresses]);
 
   const handleAddressSubmit = (event) => {
     event.preventDefault();
-    addAddress(addressForm);
+    const { countryCode, ...rest } = addressForm;
+    const cleanPhone = rest.phone.replace(/\D/g, '');
+    const address = { ...rest, phone: `${countryCode}${cleanPhone}` };
+    if (editingAddressId) {
+      updateAddress(editingAddressId, address);
+    } else {
+      addAddress(address);
+    }
     setAddressForm(emptyAddress);
+    setEditingAddressId(null);
     setTab('addresses');
   };
 
@@ -116,11 +143,16 @@ const ProfileView = () => {
             <motion.form onSubmit={handleAddressSubmit} className="glass rounded-3xl p-8 border border-emerald-100 space-y-4" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
               <div className="flex items-center gap-3 mb-2">
                 <Home className="w-5 h-5 text-emerald-600" />
-                <h2 className="text-2xl font-bold text-gray-800">Add Address</h2>
+                <h2 className="text-2xl font-bold text-gray-800">{editingAddressId ? 'Edit Address' : 'Add Address'}</h2>
               </div>
               <div className="grid md:grid-cols-2 gap-4">
                 <input required value={addressForm.name} onChange={(event) => setAddressForm({ ...addressForm, name: event.target.value })} placeholder="Full name" className="px-4 py-3 bg-white border border-gray-200 rounded-xl" />
-                <input required value={addressForm.phone} onChange={(event) => setAddressForm({ ...addressForm, phone: event.target.value })} placeholder="Phone" className="px-4 py-3 bg-white border border-gray-200 rounded-xl" />
+                <div className="flex gap-2">
+                  <select value={addressForm.countryCode || '+91'} onChange={(event) => setAddressForm({ ...addressForm, countryCode: event.target.value })} className="px-3 py-3 bg-white border border-gray-200 rounded-xl text-sm shrink-0">
+                    {countries.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                  </select>
+                  <input required value={addressForm.phone} onChange={(event) => setAddressForm({ ...addressForm, phone: event.target.value.replace(/\D/g, '') })} placeholder="Phone" className="flex-1 px-4 py-3 bg-white border border-gray-200 rounded-xl" />
+                </div>
                 <input required value={addressForm.addressLine1} onChange={(event) => setAddressForm({ ...addressForm, addressLine1: event.target.value })} placeholder="Address line 1" className="md:col-span-2 px-4 py-3 bg-white border border-gray-200 rounded-xl" />
                 <input value={addressForm.addressLine2} onChange={(event) => setAddressForm({ ...addressForm, addressLine2: event.target.value })} placeholder="Address line 2" className="md:col-span-2 px-4 py-3 bg-white border border-gray-200 rounded-xl" />
                 <input required value={addressForm.city} onChange={(event) => setAddressForm({ ...addressForm, city: event.target.value })} placeholder="City" className="px-4 py-3 bg-white border border-gray-200 rounded-xl" />
@@ -133,8 +165,8 @@ const ProfileView = () => {
                 Set as default address
               </label>
               <button type="submit" className="btn-primary px-5 py-3 flex items-center gap-2">
-                <Plus className="w-4 h-4" />
-                Save Address
+                {editingAddressId ? <Edit3 className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                {editingAddressId ? 'Update Address' : 'Save Address'}
               </button>
             </motion.form>
 
@@ -160,7 +192,7 @@ const ProfileView = () => {
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <button type="button" onClick={() => setDefaultAddress(address.id)} className="px-4 py-2 rounded-xl border border-emerald-200 text-emerald-700 hover:bg-emerald-50">Use in checkout</button>
-                    <button type="button" onClick={() => updateAddress(address.id, { ...address, name: `${address.name} (edited)` })} className="px-4 py-2 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50">Edit</button>
+                    <button type="button" onClick={() => { const { code, local } = detectCountryCode(address.phone); setAddressForm({ ...address, countryCode: code, phone: local }); setEditingAddressId(address.id); }} className="px-4 py-2 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50">Edit</button>
                     <button type="button" onClick={() => removeAddress(address.id)} className="px-4 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 flex items-center gap-2"><Trash2 className="w-4 h-4" />Remove</button>
                   </div>
                 </div>

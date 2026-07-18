@@ -1,14 +1,35 @@
 import { motion } from 'framer-motion';
-import { ArrowLeft, ChevronRight, Package, ShoppingBag } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Package, ShoppingBag, Trash2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 import { useProducts } from '../contexts/ProductContext';
+import { useAuth } from '../contexts/AuthContext';
 import { getItemImage } from '../utils/orderImageUtils';
+import { doc, deleteDoc } from 'firebase/firestore';
+import { db } from '../firebase/config';
 
 const OrdersView = () => {
   const navigate = useNavigate();
-  const { orders } = useCart();
+  const { orders, clearOrders } = useCart();
+  const { user } = useAuth();
+  const uid = user?.uid;
   const { products } = useProducts();
+
+  const handleDeleteOrder = async (orderId, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!window.confirm(`Delete order ${orderId}?`)) return;
+    try {
+      await deleteDoc(doc(db, 'users', uid, 'orders', orderId));
+    } catch (err) {
+      console.error('Failed to delete order:', err);
+    }
+  };
+
+  const handleClearAll = async () => {
+    if (!window.confirm('Delete ALL your orders permanently? This cannot be undone.')) return;
+    await clearOrders();
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
@@ -18,8 +39,17 @@ const OrdersView = () => {
           <span className="font-medium">Back</span>
         </button>
 
-        <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gradient mb-2 mt-2">My Orders</h1>
-        <p className="text-xs sm:text-sm text-gray-600 mb-8">Tap any order to open shipping, tracking, cancellation, and invoice details.</p>
+        <div className="flex items-center justify-between mb-2 mt-2">
+          <div>
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gradient">My Orders</h1>
+            <p className="text-xs sm:text-sm text-gray-600 mt-1">Tap any order to open shipping, tracking, cancellation, and invoice details.</p>
+          </div>
+          {orders.length > 0 && (
+            <button onClick={handleClearAll} className="text-xs sm:text-sm text-red-600 hover:text-red-700 font-medium flex items-center gap-1 shrink-0">
+              <Trash2 className="w-3.5 h-3.5" /> Clear All
+            </button>
+          )}
+        </div>
 
         {orders.length === 0 ? (
           <div className="glass rounded-3xl p-12 border border-emerald-100 text-center">
@@ -81,9 +111,14 @@ const OrdersView = () => {
                       </div>
                     </div>
 
-                    <div className="hidden sm:flex items-center text-emerald-700 font-semibold text-xs sm:text-sm gap-1 mt-auto">
-                      <span>Open</span>
-                      <ChevronRight className="w-4 h-4" />
+                    <div className="flex items-center gap-2 mt-auto">
+                      <button onClick={(e) => handleDeleteOrder(order.id, e)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors" title="Delete order">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                      <div className="hidden sm:flex items-center text-emerald-700 font-semibold text-xs sm:text-sm gap-1">
+                        <span>Open</span>
+                        <ChevronRight className="w-4 h-4" />
+                      </div>
                     </div>
                   </div>
                 </motion.div>

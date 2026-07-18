@@ -87,9 +87,12 @@ export const sendOrderStatusNotification = async (order, status) => {
 
   const itemsListHtml = (order.items || []).map(item => `
     <tr style="border-bottom: 1px solid #e5e7eb;">
-      <td style="padding: 10px; font-size: 14px; color: #374151;">${item.name}</td>
+      <td style="padding: 10px; font-size: 14px; color: #374151;">
+        ${item.images?.[0] ? `<img src="${item.images[0]}" alt="${item.name}" style="width:50px;height:50px;object-fit:contain;border-radius:8px;border:1px solid #e5e7eb;vertical-align:middle;margin-right:10px;" />` : ''}
+        ${item.name}${item.customText ? `<br/><span style="color:#6b7280;font-size:12px;">Custom: ${item.customText}</span>` : ''}
+      </td>
       <td style="padding: 10px; font-size: 14px; color: #374151; text-align: center;">${item.quantity}</td>
-      <td style="padding: 10px; font-size: 14px; color: #374151; text-align: right;">₹${item.price}</td>
+      <td style="padding: 10px; font-size: 14px; color: #374151; text-align: right;">₹${(item.price * item.quantity).toFixed(2)}</td>
     </tr>
   `).join('');
 

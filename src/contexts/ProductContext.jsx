@@ -4,32 +4,11 @@ import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firesto
 
 const ProductContext = createContext();
 
-const STORAGE_KEYS = {
-  products: 'saran-jute-products',
-  categories: 'saran-jute-categories',
-};
-
-// No DEFAULT_PRODUCTS — only admin-added products are shown.
-// If Firestore is empty, show empty state instead of seeding hardcoded items.
-
 const DEFAULT_CATEGORIES = [
   { id: 1, name: 'Jute Bags', image: '/Jute-Bags-1.webp', banner: '/Jute-Bags-1.webp', icon: 'Bag', featured: true, visible: true, sortOrder: 1 },
   { id: 2, name: 'Cotton Bags', image: '/canvas-bags.webp', banner: '/canvas-bags.webp', icon: 'Shirt', featured: true, visible: true, sortOrder: 2 },
   { id: 3, name: 'Canvas Bags', image: '/Canvas-tote-bag.webp', banner: '/Canvas-tote-bag.webp', icon: 'Box', featured: true, visible: true, sortOrder: 3 },
 ];
-
-const readJson = (key, fallback) => {
-  try {
-    const stored = localStorage.getItem(key);
-    return stored ? JSON.parse(stored) : fallback;
-  } catch {
-    return fallback;
-  }
-};
-
-const writeJson = (key, value) => {
-  localStorage.setItem(key, JSON.stringify(value));
-};
 
 const createProductId = () => `prod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 const createCategoryId = () => `cat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -43,12 +22,10 @@ export const useProducts = () => {
 };
 
 export const ProductProvider = ({ children }) => {
-  // Start with empty array — never seed hardcoded products
-  const [products, setProducts] = useState(() => readJson(STORAGE_KEYS.products, []));
-  const [categories, setCategories] = useState(() => readJson(STORAGE_KEYS.categories, DEFAULT_CATEGORIES));
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
   const [loading, setLoading] = useState(true);
 
-  // Sync with Firestore if active
   useEffect(() => {
     if (!isFirebaseActive) {
       setLoading(false);
@@ -56,51 +33,38 @@ export const ProductProvider = ({ children }) => {
     }
 
     const unsubscribeProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
-      // Never auto-seed default products — show empty if no admin-added products exist
       const docs = [];
-      snapshot.forEach((d) => {
-        docs.push(d.data());
-      });
+      snapshot.forEach((d) => docs.push(d.data()));
       docs.sort((a, b) => {
-        // Sort by createdAt descending if available, otherwise by id descending
         if (a.createdAt && b.createdAt) return b.createdAt.localeCompare(a.createdAt);
         return Number(b.id) - Number(a.id);
       });
       setProducts(docs);
-      writeJson(STORAGE_KEYS.products, docs);
       setLoading(false);
     }, (error) => {
-      console.warn('Products sync unavailable; using local cache.', error?.message || error);
-      setProducts(prev => prev.length === 0 ? readJson(STORAGE_KEYS.products, []) : prev);
+      console.warn('Products sync unavailable.', error?.message || error);
       setLoading(false);
     });
 
     const unsubscribeCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
       if (snapshot.empty) {
-        // Seed default categories only (not products)
         DEFAULT_CATEGORIES.forEach((c) => {
           setDoc(doc(db, 'categories', String(c.id)), c).catch(() => undefined);
         });
       } else {
         const docs = [];
-        snapshot.forEach((d) => {
-          docs.push(d.data());
-        });
+        snapshot.forEach((d) => docs.push(d.data()));
         docs.sort((a, b) => a.sortOrder - b.sortOrder);
         setCategories(docs);
-        writeJson(STORAGE_KEYS.categories, docs);
       }
     }, (error) => {
-      console.warn('Categories sync unavailable; using local cache.', error?.message || error);
-      setCategories(prev => prev.length === 0 ? readJson(STORAGE_KEYS.categories, DEFAULT_CATEGORIES) : prev);
+      console.warn('Categories sync unavailable.', error?.message || error);
     });
 
     const unsubscribeInventory = onSnapshot(collection(db, 'inventoryHistory'), (snapshot) => {
       if (!snapshot.empty) {
         const docs = [];
-        snapshot.forEach((d) => {
-          docs.push(d.data());
-        });
+        snapshot.forEach((d) => docs.push(d.data()));
         docs.sort((a, b) => b.id.localeCompare(a.id));
         setInventoryHistory(docs);
       }
@@ -114,18 +78,6 @@ export const ProductProvider = ({ children }) => {
       unsubscribeInventory();
     };
   }, []);
-
-  useEffect(() => {
-    if (!isFirebaseActive) {
-      writeJson(STORAGE_KEYS.products, products);
-    }
-  }, [products]);
-
-  useEffect(() => {
-    if (!isFirebaseActive) {
-      writeJson(STORAGE_KEYS.categories, categories);
-    }
-  }, [categories]);
 
   const getProductById = (id) => products.find((product) => String(product.id) === String(id));
   const getFeaturedProducts = () => products.filter((product) => product.featured && product.visible && !product.archived);
@@ -151,16 +103,8 @@ export const ProductProvider = ({ children }) => {
     };
 
     if (isFirebaseActive) {
-      try {
-        await setDoc(doc(db, 'products', String(nextProduct.id)), nextProduct);
-      } catch (err) {
-        const cached = readJson(STORAGE_KEYS.products, []);
-        writeJson(STORAGE_KEYS.products, [nextProduct, ...cached.filter(p => p.id !== nextProduct.id)]);
-        setProducts((prev) => prev.some(p => p.id === nextProduct.id) ? prev : [nextProduct, ...prev]);
-      }
-      return nextProduct;
+      await setDoc(doc(db, 'products', String(nextProduct.id)), nextProduct);
     }
-    setProducts((prev) => prev.some(p => p.id === nextProduct.id) ? prev : [nextProduct, ...prev]);
     return nextProduct;
   };
 
@@ -168,35 +112,18 @@ export const ProductProvider = ({ children }) => {
     if (isFirebaseActive) {
       const existing = products.find((product) => String(product.id) === String(productId));
       if (existing) {
-        try {
-          await setDoc(doc(db, 'products', String(productId)), { ...existing, ...updates });
-        } catch (err) {
-          const updated = { ...existing, ...updates };
-          const cached = readJson(STORAGE_KEYS.products, []);
-          writeJson(STORAGE_KEYS.products, cached.map(p => String(p.id) === String(productId) ? updated : p));
-          setProducts((prev) => prev.map((p) => String(p.id) === String(productId) ? updated : p));
-        }
+        await setDoc(doc(db, 'products', String(productId)), { ...existing, ...updates });
       }
-    } else {
-      setProducts((prev) => prev.map((product) => String(product.id) === String(productId) ? { ...product, ...updates } : product));
     }
   };
 
   const deleteProduct = async (productId) => {
     if (isFirebaseActive) {
-      try {
-        await deleteDoc(doc(db, 'products', String(productId)));
-      } catch (err) {
-        const cached = readJson(STORAGE_KEYS.products, []);
-        writeJson(STORAGE_KEYS.products, cached.filter(p => String(p.id) !== String(productId)));
-        setProducts((prev) => prev.filter((p) => String(p.id) !== String(productId)));
-      }
-    } else {
-      setProducts((prev) => prev.filter((product) => String(product.id) !== String(productId)));
+      await deleteDoc(doc(db, 'products', String(productId)));
     }
   };
 
-  const duplicateProduct = (productId) => {
+  const duplicateProduct = async (productId) => {
     const source = products.find((product) => String(product.id) === String(productId));
     if (!source) return null;
 
@@ -215,11 +142,7 @@ export const ProductProvider = ({ children }) => {
     };
 
     if (isFirebaseActive) {
-      setDoc(doc(db, 'products', String(copy.id)), copy).catch(() => {
-        setProducts((prev) => [copy, ...prev]);
-      });
-    } else {
-      setProducts((prev) => [copy, ...prev]);
+      await setDoc(doc(db, 'products', String(copy.id)), copy);
     }
     return copy;
   };
@@ -235,18 +158,9 @@ export const ProductProvider = ({ children }) => {
     }
   };
 
-  // Inventory History tracking
-  const [inventoryHistory, setInventoryHistory] = useState(() => {
-    return readJson('saran-jute-inventory-history', []);
-  });
+  const [inventoryHistory, setInventoryHistory] = useState([]);
 
-  useEffect(() => {
-    if (!isFirebaseActive) {
-      writeJson('saran-jute-inventory-history', inventoryHistory);
-    }
-  }, [inventoryHistory]);
-
-  const addInventoryLog = (productId, type, quantity, previousStock, newStock, notes = '') => {
+  const addInventoryLog = async (productId, type, quantity, previousStock, newStock, notes = '') => {
     const product = products.find(p => String(p.id) === String(productId));
     const newLog = {
       id: `inv-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
@@ -260,15 +174,11 @@ export const ProductProvider = ({ children }) => {
       notes,
     };
     if (isFirebaseActive) {
-      setDoc(doc(db, 'inventoryHistory', newLog.id), newLog).catch(() => {
-        setInventoryHistory(prev => [newLog, ...prev]);
-      });
-    } else {
-      setInventoryHistory(prev => [newLog, ...prev]);
+      await setDoc(doc(db, 'inventoryHistory', newLog.id), newLog);
     }
   };
 
-  const updateProductStock = (productId, stock, notes = 'Manual stock adjustment') => {
+  const updateProductStock = async (productId, stock, notes = 'Manual stock adjustment') => {
     const product = products.find(p => String(p.id) === String(productId));
     if (!product) return;
     const oldStock = product.stock;
@@ -277,30 +187,14 @@ export const ProductProvider = ({ children }) => {
     if (diff === 0) return;
 
     const type = diff > 0 ? 'Stock In' : 'Stock Out';
-    updateProduct(productId, { stock: newStock });
-    addInventoryLog(productId, type, Math.abs(diff), oldStock, newStock, notes);
+    await updateProduct(productId, { stock: newStock });
+    await addInventoryLog(productId, type, Math.abs(diff), oldStock, newStock, notes);
   };
 
-  const bulkUpdateStock = (updates, notes = 'Bulk stock adjustment') => {
-    setProducts((prevProducts) => {
-      const nextProducts = prevProducts.map((product) => {
-        const update = updates.find((u) => String(u.productId) === String(product.id));
-        if (update) {
-          const oldStock = product.stock;
-          const newStock = Math.max(0, Number(update.stock) || 0);
-          const diff = newStock - oldStock;
-          if (diff !== 0) {
-            const type = diff > 0 ? 'Stock In' : 'Stock Out';
-            setTimeout(() => {
-              addInventoryLog(product.id, type, Math.abs(diff), oldStock, newStock, notes);
-            }, 0);
-          }
-          return { ...product, stock: newStock };
-        }
-        return product;
-      });
-      return nextProducts;
-    });
+  const bulkUpdateStock = async (updates, notes = 'Bulk stock adjustment') => {
+    for (const update of updates) {
+      await updateProductStock(update.productId, update.stock, notes);
+    }
   };
 
   const addCategory = async (category) => {
@@ -312,15 +206,8 @@ export const ProductProvider = ({ children }) => {
       sortOrder: Number(category.sortOrder) || categories.length + 1,
     };
     if (isFirebaseActive) {
-      try {
-        await setDoc(doc(db, 'categories', String(nextCategory.id)), nextCategory);
-      } catch (err) {
-        setCategories((prev) => prev.some(c => c.id === nextCategory.id) ? prev : [nextCategory, ...prev]);
-        throw err;
-      }
-      return nextCategory;
+      await setDoc(doc(db, 'categories', String(nextCategory.id)), nextCategory);
     }
-    setCategories((prev) => prev.some(c => c.id === nextCategory.id) ? prev : [nextCategory, ...prev]);
     return nextCategory;
   };
 
@@ -328,28 +215,14 @@ export const ProductProvider = ({ children }) => {
     if (isFirebaseActive) {
       const existing = categories.find((c) => c.id === categoryId);
       if (existing) {
-        try {
-          await setDoc(doc(db, 'categories', String(categoryId)), { ...existing, ...updates });
-        } catch (err) {
-          setCategories((prev) => prev.map((c) => c.id === categoryId ? { ...c, ...updates } : c));
-          throw err;
-        }
+        await setDoc(doc(db, 'categories', String(categoryId)), { ...existing, ...updates });
       }
-    } else {
-      setCategories((prev) => prev.map((category) => (category.id === categoryId ? { ...category, ...updates } : category)));
     }
   };
 
   const deleteCategory = async (categoryId) => {
     if (isFirebaseActive) {
-      try {
-        await deleteDoc(doc(db, 'categories', String(categoryId)));
-      } catch (err) {
-        setCategories((prev) => prev.filter((c) => c.id !== categoryId));
-        throw err;
-      }
-    } else {
-      setCategories((prev) => prev.filter((category) => category.id !== categoryId));
+      await deleteDoc(doc(db, 'categories', String(categoryId)));
     }
   };
 

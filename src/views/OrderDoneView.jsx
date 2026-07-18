@@ -76,6 +76,8 @@ const OrderDoneView = () => {
                 <p className="text-sm text-gray-700"><span className="font-semibold">Customer:</span> {latestOrder.shippingAddress.name}</p>
                 <p className="text-sm text-gray-700"><span className="font-semibold">Address:</span> {latestOrder.shippingAddress.addressLine1}, {latestOrder.shippingAddress.city}, {latestOrder.shippingAddress.state} - {latestOrder.shippingAddress.pincode}</p>
                 <p className="text-sm text-gray-700"><span className="font-semibold">Payment:</span> {latestOrder.paymentMethod}</p>
+                {latestOrder.paidAmount > 0 && <p className="text-sm text-emerald-700"><span className="font-semibold">Paid:</span> ₹{latestOrder.paidAmount.toFixed(2)}</p>}
+                {latestOrder.pendingAmount > 0 && <p className="text-sm text-amber-700"><span className="font-semibold">Pending on Delivery:</span> ₹{latestOrder.pendingAmount.toFixed(2)}</p>}
                 <div className="pt-3 border-t border-emerald-100 text-sm text-gray-700 space-y-1">
                   <p><span className="font-semibold">Subtotal:</span> ₹{pricing.subtotal.toFixed(2)}</p>
                   <p><span className="font-semibold">Shipping:</span> {pricing.shipping === 0 ? 'Free' : `₹${pricing.shipping.toFixed(2)}`}</p>

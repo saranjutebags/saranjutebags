@@ -194,6 +194,18 @@ const OrderInfoView = () => {
           <span>Grand Total:</span>
           <span>₹{orderPricing.grandTotal.toFixed(2)}</span>
         </div>
+        {order.paidAmount > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', color: '#16A34A' }}>
+            <span>Paid Amount:</span>
+            <span>₹{order.paidAmount.toFixed(2)}</span>
+          </div>
+        )}
+        {order.pendingAmount > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '5px', color: '#D97706' }}>
+            <span>Pending on Delivery:</span>
+            <span>₹{order.pendingAmount.toFixed(2)}</span>
+          </div>
+        )}
       </div>
 
       {/* Footer */}
@@ -302,6 +314,8 @@ const OrderInfoView = () => {
                   <div className="flex items-center justify-between"><span className="text-gray-600">Shipping</span><span className="font-semibold text-gray-800">{orderPricing.shipping === 0 ? 'Free' : `₹${orderPricing.shipping.toFixed(2)}`}</span></div>
                   <div className="flex items-center justify-between"><span className="text-gray-600">GST ({orderPricing.gstRate}%)</span><span className="font-semibold text-gray-800">₹{orderPricing.gstAmount.toFixed(2)}</span></div>
                   <div className="border-t border-gray-100 pt-3 flex items-center justify-between"><span className="text-base font-bold text-gray-800">Grand Total</span><span className="text-xl font-bold text-gradient">₹{orderPricing.grandTotal.toFixed(2)}</span></div>
+                  {order.paidAmount > 0 && <div className="flex items-center justify-between text-emerald-700"><span className="font-semibold">Paid Amount</span><span className="font-bold">₹{order.paidAmount.toFixed(2)}</span></div>}
+                  {order.pendingAmount > 0 && <div className="flex items-center justify-between text-amber-700"><span className="font-semibold">Pending on Delivery</span><span className="font-bold">₹{order.pendingAmount.toFixed(2)}</span></div>}
                 </div>
               </div>
             </div>

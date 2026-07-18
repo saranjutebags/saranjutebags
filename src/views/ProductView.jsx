@@ -255,7 +255,26 @@ const ProductView = () => {
                 <p className="text-gray-500 text-sm mb-1">Material</p>
                 <p className="font-semibold text-gray-800">{product.material}</p>
               </div>
-
+              <div className={`glass rounded-xl p-4 border ${product.stock <= 0 ? 'border-red-200' : product.stock <= 5 ? 'border-amber-200' : 'border-emerald-100'}`}>
+                <p className="text-gray-500 text-sm mb-1">Stock</p>
+                {product.stock <= 0 ? (
+                  <p className="font-semibold text-red-600 flex items-center gap-1.5">
+                    <X className="w-4 h-4" /> Out of Stock
+                  </p>
+                ) : product.stock <= 5 ? (
+                  <p className="font-semibold text-amber-600 flex items-center gap-1.5">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+                    </span>
+                    Hurry, Only {product.stock} left!
+                  </p>
+                ) : (
+                  <p className="font-semibold text-emerald-600 flex items-center gap-1.5">
+                    <Check className="w-4 h-4" /> In Stock ({product.stock})
+                  </p>
+                )}
+              </div>
             </div>
 
             {/* Customization Panel */}

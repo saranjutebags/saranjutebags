@@ -8,7 +8,7 @@ import { useAdmin } from '../contexts/AdminContext';
 import { db, isFirebaseActive } from '../firebase/config';
 import { doc, setDoc, deleteDoc, collection, onSnapshot } from 'firebase/firestore';
 import { getAuth, updatePassword } from 'firebase/auth';
-import { convertFileToBase64, validateImageFile } from '../utils/imageUtils';
+import { convertFileToBase64, validateImageFile, compressImage } from '../utils/imageUtils';
 import { getItemImage } from '../utils/orderImageUtils';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -51,6 +51,7 @@ const AdminDashboard = () => {
   const { user, signOut } = useAuth();
   const { products, categories, addProduct, updateProduct, deleteProduct, addCategory, updateCategory, deleteCategory, toggleCategoryVisibility, deleteProductReview, toggleReviewVisibility } = useProducts();
   const { orders, updateOrder, deleteOrders } = useCart();
+  const { pricingSettings, updatePricingSettings } = useCart();
   const { companySettings, updateCompanySettings, banners, addBanner, updateBanner, deleteBanner, scrollingTexts, addScrollingText, updateScrollingText, deleteScrollingText, activityLogs, addActivityLog } = useAdmin();
   const navigate = useNavigate();
   
@@ -84,41 +85,32 @@ const AdminDashboard = () => {
   });
   const [productImages, setProductImages] = useState([]);
 
-  // All orders from top-level collection (admin view)
-  const [allOrders, setAllOrders] = useState(orders);
+  // All orders from top-level collection (admin view) — starts empty, populated only by Firestore
+  const [allOrders, setAllOrders] = useState([]);
 
   // Listen to top-level orders collection so admin sees ALL orders, not just own
   useEffect(() => {
-    if (!isFirebaseActive) {
-      // Non-Firebase mode: read from the shared all-orders key
-      const loadShared = () => {
-        const stored = (() => { try { return JSON.parse(localStorage.getItem('saran-jute-all-orders') || '[]'); } catch { return []; } })();
-        stored.sort((a, b) => {
+    if (!isFirebaseActive) return;
+    const unsub = onSnapshot(
+      collection(db, 'orders'),
+      { includeMetadataChanges: true },
+      (snap) => {
+        if (snap.metadata.fromCache) return;
+        const docs = [];
+        snap.forEach(d => docs.push(d.data()));
+        docs.sort((a, b) => {
           const ta = new Date(a.createdAt || a.date).getTime() || 0;
           const tb = new Date(b.createdAt || b.date).getTime() || 0;
           return tb - ta;
         });
-        setAllOrders(stored.length > 0 ? stored : orders);
-      };
-      loadShared();
-      const interval = setInterval(loadShared, 3000);
-      window.addEventListener('storage', loadShared);
-      return () => { clearInterval(interval); window.removeEventListener('storage', loadShared); };
-    }
-    const unsub = onSnapshot(collection(db, 'orders'), (snap) => {
-      const docs = [];
-      snap.forEach(d => docs.push(d.data()));
-      docs.sort((a, b) => {
-        const ta = new Date(a.createdAt || a.date).getTime() || 0;
-        const tb = new Date(b.createdAt || b.date).getTime() || 0;
-        return tb - ta;
-      });
-      setAllOrders(docs);
-    }, () => {
-      setAllOrders(orders);
-    });
+        setAllOrders(docs);
+      },
+      () => {
+        setAllOrders([]);
+      }
+    );
     return () => unsub();
-  }, [orders]);
+  }, []);
 
   // Order notifications
   const [newOrderPopup, setNewOrderPopup] = useState(false);
@@ -313,13 +305,19 @@ const AdminDashboard = () => {
 
     try {
       const newImages = [];
+      const maxTotalImages = 6;
       for (const file of files) {
+        if (productImages.length + newImages.length >= maxTotalImages) {
+          showMessage(`Maximum ${maxTotalImages} images allowed`, 'error');
+          break;
+        }
         const validation = validateImageFile(file);
         if (!validation.valid) {
           showMessage(validation.error, 'error');
           continue;
         }
-        const base64 = await convertFileToBase64(file);
+        const compressed = await compressImage(file, 0.6, 800);
+        const base64 = await convertFileToBase64(compressed);
         newImages.push(base64);
       }
       
@@ -460,7 +458,13 @@ const AdminDashboard = () => {
     const ids = showDeleteConfirm?.ids || [];
     if (ids.length === 0) return;
     try {
-      deleteOrders(ids);
+      for (const orderId of ids) {
+        const order = allOrders.find(o => o.id === orderId);
+        if (order?.userId) {
+          await deleteDoc(doc(db, 'users', order.userId, 'orders', orderId)).catch(() => {});
+        }
+        await deleteDoc(doc(db, 'orders', orderId));
+      }
       showMessage(`${ids.length} order(s) deleted successfully`);
     } catch (error) {
       showMessage('Failed to delete orders', 'error');
@@ -1872,9 +1876,143 @@ const AdminDashboard = () => {
     const a = document.createElement('a');
     a.href = url;
     a.download = `customers-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+
+  const downloadCSV = (headers, rows, filename) => {
+    const csvContent = [headers, ...rows].map(row =>
+      row.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')
+    ).join('\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${filename}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportProductsCSV = () => {
+    const headers = ['ID', 'Name', 'SKU', 'Category', 'Price', 'Original Price', 'Discount %', 'Stock', 'Material', 'Featured', 'Archived', 'Visible', 'Created At'];
+    const rows = products.map(p => [
+      p.id, p.name, p.sku || '', p.category || '', p.price || 0,
+      p.originalPrice || 0, p.discount || 0, p.stock || 0, p.material || '',
+      p.featured ? 'Yes' : 'No', p.archived ? 'Yes' : 'No', p.visible !== false ? 'Yes' : 'No',
+      p.createdAt || ''
+    ]);
+    downloadCSV(headers, rows, 'products');
+  };
+
+  const exportOrdersCSV = (dateFilter, customFrom = '', customTo = '') => {
+    let filtered = allOrders;
+    const now = new Date();
+    if (dateFilter === 'custom' && customFrom && customTo) {
+      const from = new Date(customFrom);
+      const to = new Date(customTo);
+      to.setHours(23, 59, 59, 999);
+      filtered = allOrders.filter(o => {
+        const d = new Date(o.createdAt || o.date).getTime();
+        return d >= from.getTime() && d <= to.getTime();
+      });
+    } else if (dateFilter === 'today') {
+      const todayStr = now.toLocaleDateString();
+      filtered = allOrders.filter(o => o.date === todayStr || new Date(o.createdAt || o.date).toLocaleDateString() === todayStr);
+    } else if (dateFilter === 'week') {
+      const weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7);
+      filtered = allOrders.filter(o => new Date(o.createdAt || o.date).getTime() >= weekAgo.getTime());
+    } else if (dateFilter === 'month') {
+      const monthAgo = new Date(now); monthAgo.setMonth(monthAgo.getMonth() - 1);
+      filtered = allOrders.filter(o => new Date(o.createdAt || o.date).getTime() >= monthAgo.getTime());
+    } else if (dateFilter === 'year') {
+      const yearAgo = new Date(now); yearAgo.setFullYear(yearAgo.getFullYear() - 1);
+      filtered = allOrders.filter(o => new Date(o.createdAt || o.date).getTime() >= yearAgo.getTime());
+    }
+    const headers = ['Order ID', 'Date', 'Customer Name', 'Phone', 'Email', 'Address', 'City', 'State', 'Pincode', 'Items', 'Subtotal', 'Shipping', 'GST', 'Discount', 'Total', 'Status', 'Payment Method'];
+    const rows = filtered.map(o => {
+      const addr = o.shippingAddress || {};
+      const items = (o.items || []).map(i => `${i.name} x${i.quantity}`).join('; ');
+      return [
+        o.id, o.date || '', addr.name || '', addr.phone || '', o.userEmail || addr.email || '',
+        `${addr.addressLine1 || ''} ${addr.addressLine2 || ''}`.trim(), addr.city || '', addr.state || '', addr.pincode || '',
+        items, o.subtotal || 0, o.shippingCharge || 0, o.gstAmount || 0, o.discountAmount || 0,
+        o.grandTotal || o.total || 0, o.status || '', o.paymentMethod || ''
+      ];
+    });
+    downloadCSV(headers, rows, `orders-${dateFilter}`);
+  };
+
+  const exportUsersCSV = () => {
+    const seen = new Set();
+    const uniqueUsers = [];
+    allOrders.forEach(o => {
+      const email = o.userEmail || o.shippingAddress?.email || '';
+      const name = o.shippingAddress?.name || '';
+      const phone = o.shippingAddress?.phone || '';
+      if (email && !seen.has(email)) {
+        seen.add(email);
+        uniqueUsers.push({ email, name, phone, uid: o.userId || '' });
+      }
+    });
+    const headers = ['Email', 'Name', 'Phone', 'User ID'];
+    const rows = uniqueUsers.map(u => [u.email, u.name, u.phone, u.uid]);
+    downloadCSV(headers, rows, 'users');
+  };
+
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportDateFilter, setExportDateFilter] = useState('all');
+  const [exportDateFrom, setExportDateFrom] = useState('');
+  const [exportDateTo, setExportDateTo] = useState('');
+
+  const renderExportModal = () => (
+    <AnimatePresence>
+      {showExportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowExportModal(false)} />
+          <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: 20 }} className="relative bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-800">Export Data</h2>
+              <button onClick={() => setShowExportModal(false)} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5 text-gray-500" /></button>
+            </div>
+            <div className="space-y-3">
+              <button onClick={() => { exportProductsCSV(); setShowExportModal(false); }} className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 text-blue-700 rounded-xl hover:bg-blue-100 transition-colors"><Download className="w-5 h-5" /><span className="font-medium">Export Products</span></button>
+              <button onClick={() => { exportCustomersCSV(); setShowExportModal(false); }} className="w-full flex items-center gap-3 px-4 py-3 bg-emerald-50 text-emerald-700 rounded-xl hover:bg-emerald-100 transition-colors"><Download className="w-5 h-5" /><span className="font-medium">Export Customers</span></button>
+              <button onClick={() => { exportUsersCSV(); setShowExportModal(false); }} className="w-full flex items-center gap-3 px-4 py-3 bg-purple-50 text-purple-700 rounded-xl hover:bg-purple-100 transition-colors"><Download className="w-5 h-5" /><span className="font-medium">Export Users</span></button>
+              <div className="border-t pt-3">
+                <p className="text-sm font-medium text-gray-700 mb-2">Export Orders</p>
+                <select value={exportDateFilter} onChange={e => { setExportDateFilter(e.target.value); if (e.target.value !== 'custom') { setExportDateFrom(''); setExportDateTo(''); } }} className="w-full p-2.5 border border-gray-300 rounded-lg text-sm mb-2">
+                  <option value="today">Today</option>
+                  <option value="week">This Week</option>
+                  <option value="month">This Month</option>
+                  <option value="year">This Year</option>
+                  <option value="all">All Time</option>
+                  <option value="custom">Custom Range</option>
+                </select>
+                {exportDateFilter === 'custom' && (
+                  <div className="flex gap-2 mb-2">
+                    <input type="date" value={exportDateFrom} onChange={e => setExportDateFrom(e.target.value)} className="flex-1 p-2.5 border border-gray-300 rounded-lg text-sm" />
+                    <input type="date" value={exportDateTo} onChange={e => setExportDateTo(e.target.value)} className="flex-1 p-2.5 border border-gray-300 rounded-lg text-sm" />
+                  </div>
+                )}
+                <button onClick={() => {
+                  if (exportDateFilter === 'custom' && (!exportDateFrom || !exportDateTo)) {
+                    alert('Please select both start and end dates for custom range.');
+                    return;
+                  }
+                  exportOrdersCSV(exportDateFilter, exportDateFrom, exportDateTo);
+                  setShowExportModal(false);
+                }} className="w-full flex items-center gap-3 px-4 py-3 bg-amber-50 text-amber-700 rounded-xl hover:bg-amber-100 transition-colors"><Download className="w-5 h-5" /><span className="font-medium">Export Orders{exportDateFilter !== 'all' ? ` (${exportDateFilter})` : ''}</span></button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
 
   const renderCustomers = () => {
     const uniqueCustomers = getUniqueCustomers();
@@ -2158,6 +2296,46 @@ const AdminDashboard = () => {
           <Save className="w-4 h-4" />
           {loading ? 'Saving...' : 'Save Settings'}
         </button>
+      </Card>
+
+      <Card title="Pricing Settings">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">GST Rate (%)</label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              value={pricingSettings.gstRate}
+              onChange={(e) => updatePricingSettings({ gstRate: Number(e.target.value) })}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Shipping Charge (₹)</label>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={pricingSettings.shippingCharge}
+              onChange={(e) => updatePricingSettings({ shippingCharge: Number(e.target.value) })}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Free Shipping Above (₹)</label>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={pricingSettings.freeShippingThreshold}
+              onChange={(e) => updatePricingSettings({ freeShippingThreshold: Number(e.target.value) })}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+        <p className="text-xs text-gray-500 mt-3">Changes apply immediately. GST and shipping charges will be reflected in customer checkout.</p>
       </Card>
 
       <Card title="Change Password">
@@ -2868,6 +3046,18 @@ const AdminDashboard = () => {
                       <span className="font-bold text-lg">Total</span>
                       <span className="font-bold text-lg text-emerald-600">₹{selectedOrder.pricing?.grandTotal || selectedOrder.grandTotal || selectedOrder.total}</span>
                     </div>
+                    {selectedOrder.paidAmount > 0 && (
+                      <div className="flex justify-between text-emerald-700">
+                        <span className="font-medium">Paid Amount</span>
+                        <span className="font-bold">₹{selectedOrder.paidAmount.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {selectedOrder.pendingAmount > 0 && (
+                      <div className="flex justify-between text-amber-700">
+                        <span className="font-medium">Pending on Delivery</span>
+                        <span className="font-bold">₹{selectedOrder.pendingAmount.toFixed(2)}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -3141,6 +3331,13 @@ const AdminDashboard = () => {
           <h1 className="text-xl md:text-2xl font-bold text-gray-800">Admin Dashboard</h1>
           <div className="flex items-center gap-3">
             <button
+              onClick={() => setShowExportModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-medium"
+            >
+              <Download className="w-4 h-4" />
+              <span className="hidden sm:inline">Export</span>
+            </button>
+            <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className="p-2 rounded-lg hover:bg-gray-100"
               title={soundEnabled ? 'Sound On' : 'Sound Off'}
@@ -3204,6 +3401,7 @@ const AdminDashboard = () => {
           {activeTab === 'theme' && renderTheme()}
           {activeTab === 'activity' && renderActivityLogs()}
           {activeTab === 'settings' && renderSettings()}
+          {renderExportModal()}
         </main>
       </div>
     </div>
