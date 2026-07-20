@@ -12,6 +12,7 @@ import { convertFileToBase64, validateImageFile, compressImage } from '../utils/
 import { getItemImage } from '../utils/orderImageUtils';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
+import { isDelhiveryActive, fetchWaybill, createShipment, requestPickup, calculateShippingCharge } from '../services/delhivery';
 import {
   LayoutDashboard,
   Package,
@@ -51,7 +52,7 @@ const AdminDashboard = () => {
   const { user, signOut } = useAuth();
   const { products, categories, addProduct, updateProduct, deleteProduct, addCategory, updateCategory, deleteCategory, toggleCategoryVisibility, deleteProductReview, toggleReviewVisibility } = useProducts();
   const { orders, updateOrder, deleteOrders } = useCart();
-  const { pricingSettings, updatePricingSettings } = useCart();
+  const { pricingSettings, updatePricingSettings, warehouse, domesticShipping, internationalRates, updateWarehouse, updateDomesticShipping, updateInternationalShipping } = useCart();
   const { companySettings, updateCompanySettings, banners, addBanner, updateBanner, deleteBanner, scrollingTexts, addScrollingText, updateScrollingText, deleteScrollingText, activityLogs, addActivityLog } = useAdmin();
   const navigate = useNavigate();
   
@@ -171,6 +172,7 @@ const AdminDashboard = () => {
 
   // Order details modal
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [delhiveryShipping, setDelhiveryShipping] = useState(false);
 
   // Theme
   const [themeColors, setThemeColors] = useState({
@@ -374,6 +376,7 @@ const AdminDashboard = () => {
         showDiscount: false,
         material: '',
         stock: '',
+        weightPerPiece: '',
         category: '',
         description: '',
         images: '',
@@ -402,6 +405,7 @@ const AdminDashboard = () => {
       showDiscount: product.showDiscount !== undefined ? product.showDiscount : Boolean(product.originalPrice),
       material: product.material || '',
       stock: product.stock || '',
+      weightPerPiece: product.weightPerPiece || '',
       category: product.category || '',
       description: product.description || '',
       images: urls.join(','),
@@ -434,6 +438,136 @@ const AdminDashboard = () => {
     } catch (error) {
       console.error('Order update error:', error);
       showMessage('Failed to update order status', 'error');
+    }
+  };
+
+  const handleShipWithDelhivery = async (order) => {
+    if (!isDelhiveryActive()) {
+      showMessage('Delhivery API key not configured', 'error');
+      return;
+    }
+    if (!warehouse?.pincode || !warehouse?.name || !warehouse?.phone) {
+      showMessage('Please set warehouse name, phone, and pincode in settings first', 'error');
+      return;
+    }
+    if (!order?.shippingAddress?.pincode) {
+      showMessage('Order has no delivery pincode', 'error');
+      return;
+    }
+
+    setDelhiveryShipping(true);
+    try {
+      const items = order.items || [];
+      const totalWeightGrams = Math.round(
+        Math.max(items.reduce((sum, item) => sum + (item.weightPerPiece || 1) * (item.quantity || 1), 0) * 1000, 1000)
+      );
+
+      showMessage('Fetching waybill from Delhivery…');
+
+      const waybillData = await fetchWaybill(1);
+      const waybills = waybillData?.waybills || waybillData?.data?.waybills || [];
+      if (!waybills.length) {
+        throw new Error('No waybill returned from Delhivery');
+      }
+      const waybill = waybills[0];
+
+      showMessage(`Waybill ${waybill} obtained. Creating shipment…`);
+
+      const paymentMode = order.paymentMethod === 'COD' ? 'COD' : 'Prepaid';
+
+      const shipmentPayload = {
+        shipments: [
+          {
+            waybill,
+            order_id: order.id,
+            name: order.shippingAddress.name || '',
+            phone: (order.shippingAddress.phone || '').replace(/\D/g, '').slice(-10),
+            address: order.shippingAddress.addressLine1 || '',
+            address_2: order.shippingAddress.addressLine2 || '',
+            city: order.shippingAddress.city || '',
+            state: order.shippingAddress.state || '',
+            country: 'India',
+            pincode: order.shippingAddress.pincode,
+            payment_mode: paymentMode,
+            cod_amount: paymentMode === 'COD' ? Math.round(order.grandTotal || order.total || 0) : 0,
+            total_amount: Math.round(order.grandTotal || order.total || 0),
+            weight: totalWeightGrams,
+            seller_name: companySettings?.companyName || 'Saran Jute Bags',
+            seller_address: warehouse.address || '',
+            seller_city: (warehouse.address || '').split(',')[1]?.trim() || 'Hyderabad',
+            seller_state: (warehouse.address || '').split(',')[2]?.split(' ')[0]?.trim() || 'Telangana',
+            seller_pincode: warehouse.pincode,
+            seller_phone: (warehouse.phone || '').replace(/\D/g, '').slice(-10),
+            pickup_location: warehouse.name || 'Main Warehouse',
+          },
+        ],
+        pickup_location: {
+          name: warehouse.name || 'Main Warehouse',
+          address: warehouse.address || '',
+          city: (warehouse.address || '').split(',')[1]?.trim() || 'Hyderabad',
+          state: (warehouse.address || '').split(',')[2]?.split(' ')[0]?.trim() || 'Telangana',
+          pincode: warehouse.pincode,
+          phone: (warehouse.phone || '').replace(/\D/g, '').slice(-10),
+        },
+      };
+
+      await createShipment(shipmentPayload);
+
+      showMessage('Getting actual shipping charge…');
+
+      const chargeResult = await calculateShippingCharge({
+        originPin: warehouse.pincode,
+        destPin: order.shippingAddress.pincode,
+        weightGrams: totalWeightGrams,
+        isCOD: paymentMode === 'COD',
+      });
+
+      const actualCharge = chargeResult?.total_amount || chargeResult?.data?.total_amount || 0;
+
+      const updatedShipping = actualCharge > 0 ? Math.round(actualCharge * 100) / 100 : order.shippingCharge || 0;
+      const updatedGrandTotal = Math.round(((order.grandTotal || order.total || 0) - (order.shippingCharge || 0) + updatedShipping) * 100) / 100;
+
+      await updateOrder(order.id, {
+        trackingNumber: waybill,
+        shippingCharge: updatedShipping,
+        grandTotal: updatedGrandTotal,
+        total: updatedGrandTotal,
+        status: 'Shipped',
+        delhiveryShipment: { waybill, shippedAt: new Date().toISOString(), charge: updatedShipping },
+      }, order);
+
+      showMessage('Requesting pickup…');
+
+      const pickupPayload = {
+        pickup_time: new Date().toISOString().slice(0, 16),
+        pickup_date: new Date().toISOString().slice(0, 10),
+        name: warehouse.name || 'Main Warehouse',
+        address: warehouse.address || '',
+        city: (warehouse.address || '').split(',')[1]?.trim() || 'Hyderabad',
+        state: (warehouse.address || '').split(',')[2]?.split(' ')[0]?.trim() || 'Telangana',
+        pincode: warehouse.pincode,
+        phone: (warehouse.phone || '').replace(/\D/g, '').slice(-10),
+        waybill,
+      };
+
+      await requestPickup(pickupPayload).catch(() => {});
+
+      setSelectedOrder((prev) => prev ? {
+        ...prev,
+        trackingNumber: waybill,
+        status: 'Shipped',
+        shippingCharge: updatedShipping,
+        grandTotal: updatedGrandTotal,
+        total: updatedGrandTotal,
+      } : null);
+
+      addActivityLog(`Shipped order ${order.id} via Delhivery (waybill ${waybill})`, user?.email);
+      showMessage(`✓ Shipped via Delhivery! Waybill: ${waybill}. Actual charge: ₹${updatedShipping}`);
+    } catch (err) {
+      console.error('Delhivery shipping error:', err);
+      showMessage(`Ship failed: ${err.message}`, 'error');
+    } finally {
+      setDelhiveryShipping(false);
     }
   };
 
@@ -1017,6 +1151,15 @@ const AdminDashboard = () => {
             onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })}
             placeholder="Enter stock quantity"
           />
+          <Input
+            label="Weight per Piece (kg)"
+            type="number"
+            step="0.01"
+            min="0"
+            value={productForm.weightPerPiece}
+            onChange={(e) => setProductForm({ ...productForm, weightPerPiece: e.target.value })}
+            placeholder="e.g. 0.25"
+          />
           <div className="space-y-1">
             <label className="block text-sm font-medium text-gray-700">Material Type</label>
             <select
@@ -1134,7 +1277,7 @@ const AdminDashboard = () => {
             <button
               onClick={() => {
                 setEditingProduct(null);
-                setProductForm({ name: '', price: '', stock: '', category: '', description: '', images: '', sku: '' });
+                setProductForm({ name: '', price: '', stock: '', weightPerPiece: '', category: '', description: '', images: '', sku: '' });
               }}
               className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
             >
@@ -1898,10 +2041,10 @@ const AdminDashboard = () => {
   };
 
   const exportProductsCSV = () => {
-    const headers = ['ID', 'Name', 'SKU', 'Category', 'Price', 'Original Price', 'Discount %', 'Stock', 'Material', 'Featured', 'Archived', 'Visible', 'Created At'];
+    const headers = ['ID', 'Name', 'SKU', 'Category', 'Price', 'Original Price', 'Discount %', 'Stock', 'Weight (kg)', 'Material', 'Featured', 'Archived', 'Visible', 'Created At'];
     const rows = products.map(p => [
       p.id, p.name, p.sku || '', p.category || '', p.price || 0,
-      p.originalPrice || 0, p.discount || 0, p.stock || 0, p.material || '',
+      p.originalPrice || 0, p.discount || 0, p.stock || 0, p.weightPerPiece || 0, p.material || '',
       p.featured ? 'Yes' : 'No', p.archived ? 'Yes' : 'No', p.visible !== false ? 'Yes' : 'No',
       p.createdAt || ''
     ]);
@@ -2336,6 +2479,107 @@ const AdminDashboard = () => {
           </div>
         </div>
         <p className="text-xs text-gray-500 mt-3">Changes apply immediately. GST and shipping charges will be reflected in customer checkout.</p>
+      </Card>
+
+      <Card title="Warehouse Location">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Warehouse Name (Pickup Location)</label>
+            <input type="text" value={warehouse?.name || ''} onChange={(e) => updateWarehouse({ name: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="e.g. Main Warehouse" />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Pickup Phone</label>
+            <input type="text" value={warehouse?.phone || ''} onChange={(e) => updateWarehouse({ phone: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="e.g. +91 9876543210" />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Latitude</label>
+            <input type="number" step="any" value={warehouse?.lat || ''} onChange={(e) => updateWarehouse({ lat: Number(e.target.value) })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="e.g. 17.433333" />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Longitude</label>
+            <input type="number" step="any" value={warehouse?.lng || ''} onChange={(e) => updateWarehouse({ lng: Number(e.target.value) })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="e.g. 78.383333" />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Place ID (optional)</label>
+            <input type="text" value={warehouse?.placeId || ''} onChange={(e) => updateWarehouse({ placeId: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Google Maps Place ID" />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Address</label>
+            <input type="text" value={warehouse?.address || ''} onChange={(e) => updateWarehouse({ address: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Pincode</label>
+            <input type="text" value={warehouse?.pincode || ''} onChange={(e) => updateWarehouse({ pincode: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="e.g. 500028" />
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={warehouse?.active !== false} onChange={(e) => updateWarehouse({ active: e.target.checked })} className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" />
+              <span className="text-sm font-medium text-gray-700">Warehouse active</span>
+            </label>
+          </div>
+        </div>
+        <p className="text-xs text-gray-500 mt-3">Pincode is used to fetch real-time shipping rates via Delhivery API. Lat/Lng used as fallback for distance calculation.</p>
+      </Card>
+
+      <Card title="Domestic Shipping Rates">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Base Charge (₹)</label>
+            <input type="number" min="0" step="1" value={domesticShipping?.baseCharge ?? 40} onChange={(e) => updateDomesticShipping({ baseCharge: Number(e.target.value) })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Per Km Charge (₹)</label>
+            <input type="number" min="0" step="1" value={domesticShipping?.perKm ?? 8} onChange={(e) => updateDomesticShipping({ perKm: Number(e.target.value) })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Free Delivery Above (₹)</label>
+            <input type="number" min="0" step="1" value={domesticShipping?.freeDeliveryAbove ?? 5000} onChange={(e) => updateDomesticShipping({ freeDeliveryAbove: Number(e.target.value) })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+          </div>
+        </div>
+        <p className="text-xs text-gray-500 mt-3">Formula: base + (per km × distance). Free delivery when subtotal exceeds the threshold.</p>
+      </Card>
+
+      <Card title="International Shipping Rates (per kg)">
+        <div className="space-y-3">
+          {internationalRates.map((rate, idx) => (
+            <div key={idx} className="flex flex-wrap items-end gap-3 p-3 bg-gray-50 rounded-lg">
+              <div className="space-y-1 flex-1 min-w-[120px]">
+                <label className="block text-xs font-medium text-gray-700">Country</label>
+                <input type="text" value={rate.country} onChange={(e) => { const next = [...internationalRates]; next[idx] = { ...next[idx], country: e.target.value }; updateInternationalShipping(next); }} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm" />
+              </div>
+              <div className="space-y-1 w-16">
+                <label className="block text-xs font-medium text-gray-700">Code</label>
+                <input type="text" value={rate.code} onChange={(e) => { const next = [...internationalRates]; next[idx] = { ...next[idx], code: e.target.value.toUpperCase() }; updateInternationalShipping(next); }} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm uppercase" maxLength="2" />
+              </div>
+              <div className="space-y-1 w-24">
+                <label className="block text-xs font-medium text-gray-700">Rate/kg</label>
+                <input type="number" min="0" step="1" value={rate.ratePerKg} onChange={(e) => { const next = [...internationalRates]; next[idx] = { ...next[idx], ratePerKg: Number(e.target.value) }; updateInternationalShipping(next); }} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm" />
+              </div>
+              <div className="space-y-1 w-20">
+                <label className="block text-xs font-medium text-gray-700">Currency</label>
+                <input type="text" value={rate.currency} onChange={(e) => { const next = [...internationalRates]; next[idx] = { ...next[idx], currency: e.target.value.toUpperCase() }; updateInternationalShipping(next); }} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm" maxLength="3" />
+              </div>
+              <div className="space-y-1 w-24">
+                <label className="block text-xs font-medium text-gray-700">Min Charge</label>
+                <input type="number" min="0" step="1" value={rate.minCharge} onChange={(e) => { const next = [...internationalRates]; next[idx] = { ...next[idx], minCharge: Number(e.target.value) }; updateInternationalShipping(next); }} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm" />
+              </div>
+              <div className="space-y-1 w-24">
+                <label className="block text-xs font-medium text-gray-700">Est. Days</label>
+                <input type="text" value={rate.estimatedDays} onChange={(e) => { const next = [...internationalRates]; next[idx] = { ...next[idx], estimatedDays: e.target.value }; updateInternationalShipping(next); }} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm" placeholder="7-10" />
+              </div>
+              <button onClick={() => { const next = internationalRates.filter((_, i) => i !== idx); updateInternationalShipping(next); }} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={() => { const next = [...internationalRates, { country: '', code: '', ratePerKg: 0, currency: 'USD', minCharge: 0, estimatedDays: '7-10' }]; updateInternationalShipping(next); }}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-emerald-700 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-colors"
+          >
+            <Plus className="w-4 h-4" /> Add Country
+          </button>
+        </div>
+        <p className="text-xs text-gray-500 mt-3">Charges are calculated as weight (kg) × rate/kg, with a minimum charge floor.</p>
       </Card>
 
       <Card title="Change Password">
@@ -3071,6 +3315,69 @@ const AdminDashboard = () => {
                     )}
                   </div>
                 )}
+
+                {/* Tracking / Ship with Delhivery */}
+                <div className="bg-gray-50 rounded-xl p-4">
+                  <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
+                    <Truck className="w-5 h-5 text-emerald-600" />
+                    Delhivery Shipping
+                  </h3>
+
+                  {selectedOrder.trackingNumber ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="text"
+                          value={selectedOrder.trackingNumber || ''}
+                          onChange={(e) => setSelectedOrder((prev) => prev ? { ...prev, trackingNumber: e.target.value } : null)}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim();
+                            updateOrder(selectedOrder.id, { trackingNumber: val || null }, selectedOrder);
+                          }}
+                          placeholder="Delhivery waybill / AWB number"
+                          className="flex-1 p-3 border border-gray-300 rounded-lg"
+                        />
+                        <a
+                          href={`https://www.delhivery.com/tracking/${selectedOrder.trackingNumber}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all text-sm whitespace-nowrap flex items-center gap-2"
+                        >
+                          <Truck className="w-4 h-4" />
+                          Track
+                        </a>
+                      </div>
+                      <p className="text-xs text-emerald-700 bg-emerald-100 rounded-lg px-3 py-2">
+                        ✓ Shipped via Delhivery — waybill {selectedOrder.trackingNumber}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-sm text-gray-600">Ready to ship this order via Delhivery?</p>
+                      <button
+                        onClick={() => handleShipWithDelhivery(selectedOrder)}
+                        disabled={delhiveryShipping}
+                        className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-all text-sm font-semibold flex items-center justify-center gap-2"
+                      >
+                        <Truck className="w-4 h-4" />
+                        {delhiveryShipping ? 'Processing…' : 'Ship with Delhivery'}
+                      </button>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="text"
+                          value={selectedOrder.trackingNumber || ''}
+                          onChange={(e) => setSelectedOrder((prev) => prev ? { ...prev, trackingNumber: e.target.value } : null)}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim();
+                            if (val) updateOrder(selectedOrder.id, { trackingNumber: val }, selectedOrder);
+                          }}
+                          placeholder="Or enter waybill manually"
+                          className="flex-1 p-3 border border-gray-300 rounded-lg text-sm"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {/* Actions */}
               <div className="flex flex-wrap gap-3">

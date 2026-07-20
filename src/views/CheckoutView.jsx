@@ -1,10 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, CheckCircle2, CreditCard, Home, Plus, Tag, Truck, Wallet, X, Upload } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useProducts } from '../contexts/ProductContext';
 import UiPopup from '../components/UiPopup';
+import {
+  isInternational, getCountryName,
+  calcInternationalShipping, calcTotalWeight,
+  getCodAvailability
+} from '../utils/delivery';
+import { isDelhiveryActive, calculateShippingCharge } from '../services/delhivery';
 
 const emptyAddress = {
   name: '',
@@ -51,9 +58,15 @@ const countries = [
   { code: '+44', label: 'United Kingdom (+44)' },
   { code: '+61', label: 'Australia (+61)' },
   { code: '+971', label: 'UAE (+971)' },
+  { code: '+49', label: 'Germany (+49)' },
   { code: '+65', label: 'Singapore (+65)' },
   { code: '+60', label: 'Malaysia (+60)' },
 ];
+
+const phoneToCountryCode = {
+  '+91': 'IN', '+1': 'US', '+44': 'GB', '+61': 'AU',
+  '+971': 'AE', '+49': 'DE', '+65': 'SG', '+60': 'MY',
+};
 
 const detectCountryCode = (phone = '') => {
   for (const c of countries) {
@@ -65,8 +78,9 @@ const detectCountryCode = (phone = '') => {
 /* ──────────────────────────────────────────────── */
 
 const CheckoutView = () => {
-  const { cart, cartTotal, addresses, getDefaultAddress, addAddress, updateAddress, addOrder, setLatestOrderItem, clearCart, setDefaultAddress, calculateOrderPricing, pricingSettings, coupons } = useCart();
+  const { cart, cartTotal, addresses, getDefaultAddress, addAddress, updateAddress, addOrder, setLatestOrderItem, clearCart, setDefaultAddress, calculateOrderPricing, pricingSettings, coupons, warehouse, domesticShipping, internationalRates, updateOrder } = useCart();
   const { user, userData } = useAuth();
+  const { products, updateProductStock } = useProducts();
   const navigate = useNavigate();
   const isLoggedIn = Boolean(user);
   const canOrder = Boolean(user) && userData?.role !== 'admin';
@@ -81,6 +95,8 @@ const CheckoutView = () => {
   const [customOrderEnabled, setCustomOrderEnabled] = useState(false);
   const [customOrder, setCustomOrder] = useState(emptyCustomOrder);
   const [popup, setPopup] = useState(null);
+  const [delhiveryCharge, setDelhiveryCharge] = useState(null);
+  const [delhiveryLoading, setDelhiveryLoading] = useState(false);
 
   // Coupon state
   const [couponInput, setCouponInput] = useState('');
@@ -104,33 +120,137 @@ const CheckoutView = () => {
     [cartTotal, couponDiscountInfo],
   );
 
+  // Fetch real-time shipping charge from Delhivery when pincode or cart changes
+  useEffect(() => {
+    console.log('[Delhivery] Checkout useEffect triggered');
+    if (!isDelhiveryActive()) {
+      console.log('[Delhivery] Not active - no API key');
+      setDelhiveryCharge(null);
+      return;
+    }
+    if (!warehouse?.pincode) {
+      console.log('[Delhivery] Warehouse has no pincode');
+      setDelhiveryCharge(null);
+      return;
+    }
+    const destPin = selectedAddress?.pincode?.trim();
+    if (!destPin) {
+      console.log('[Delhivery] No destination pincode from selected address');
+      setDelhiveryCharge(null);
+      return;
+    }
+    const rawWeightGrams = Math.round(calcTotalWeight(cart) * 1000);
+    const weightGrams = Math.max(rawWeightGrams, 1000); // default minimum 1kg
+    console.log(`[Delhivery] Cart raw weight=${rawWeightGrams}g, using ${weightGrams}g for API`);
+
+    let cancelled = false;
+    setDelhiveryLoading(true);
+    console.log(`[Delhivery] Calling calculateShippingCharge with origin=${warehouse.pincode}, dest=${destPin}, weight=${weightGrams}g`);
+
+    calculateShippingCharge({ originPin: warehouse.pincode, destPin, weightGrams })
+      .then((result) => {
+        if (cancelled) return;
+        console.log('[Delhivery] API response:', result);
+        const charge = result?.total_amount;
+        if (charge != null && charge > 0) {
+          console.log(`[Delhivery] Got shipping charge: ₹${charge}`);
+          setDelhiveryCharge(Number(charge));
+        } else {
+          console.log('[Delhivery] No valid charge in response, using fallback');
+          setDelhiveryCharge(null);
+        }
+        setDelhiveryLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('[Delhivery] API call failed:', err);
+        setDelhiveryCharge(null);
+        setDelhiveryLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [selectedAddress?.pincode, cart, warehouse?.pincode]);
+
+  const shippingDetails = useMemo(() => {
+    let countryCode = 'IN';
+    let shippingCharge = 0;
+    let estDelivery = '';
+    let codAvailable = true;
+    let totalWeight = 0;
+
+    if (selectedAddress) {
+      const prefix = countries.find(c => selectedAddress.phone?.startsWith(c.code));
+      countryCode = prefix ? (phoneToCountryCode[prefix.code] || 'IN') : 'IN';
+      const isIntl = isInternational(countryCode);
+
+      totalWeight = calcTotalWeight(cart);
+
+      if (isIntl) {
+        const rate = internationalRates.find(r => r.code === countryCode);
+        if (rate) {
+          shippingCharge = calcInternationalShipping(totalWeight, rate.ratePerKg, rate.minCharge);
+        } else {
+          shippingCharge = pricingSettings.shippingCharge;
+        }
+        codAvailable = false;
+      } else {
+        shippingCharge = delhiveryCharge != null ? delhiveryCharge : (pricingSettings.shippingCharge || 0);
+        codAvailable = getCodAvailability(countryCode);
+      }
+      estDelivery = '3-7 business days';
+    } else {
+      shippingCharge = pricingSettings.shippingCharge;
+    }
+    return { shippingCharge, estDelivery, codAvailable, countryCode, totalWeight };
+  }, [selectedAddress, cart, cartTotal, internationalRates, delhiveryCharge]);
+
+  // Override pricing with dynamic shipping
+  const dynamicShipping = shippingDetails.shippingCharge;
+  const dynamicTaxable = Math.max(cartTotal - couponDiscountAmount, 0);
+  const dynamicGst = Math.round(dynamicTaxable * (pricingSettings.gstRate / 100) * 100) / 100;
+  const dynamicTotal = Math.round((dynamicTaxable + dynamicShipping + dynamicGst) * 100) / 100;
+
   const pricing = calculateOrderPricing(cartTotal, couponDiscountAmount);
-  const shipping = pricing.shipping;
-  const gst = pricing.gstAmount;
-  const total = pricing.grandTotal;
+  const shipping = dynamicShipping;
+  const gst = dynamicGst;
+  const total = dynamicTotal;
   const CUSTOM_ADVANCE = 100;
   const isCustom = customOrderEnabled && customOrder.quantity > 0;
   const advance = paymentMethod === 'cod' ? (isCustom ? CUSTOM_ADVANCE : 0) : total;
   const balance = Math.max(total - advance, 0);
 
-  const handleRazorpayPayment = (order) => {
+  const loadRazorpayScript = () => {
     return new Promise((resolve, reject) => {
+      if (window.Razorpay) { resolve(); return; }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Failed to load Razorpay SDK. Check your internet connection.'));
+      document.head.appendChild(script);
+    });
+  };
+
+  const handleRazorpayPayment = async (order) => {
+    await loadRazorpayScript();
+    return new Promise((resolve) => {
       if (!window.Razorpay) {
-        reject(new Error('Razorpay SDK not loaded. Please check your internet connection.'));
+        resolve({ paid: false, error: 'Razorpay SDK not loaded' });
         return;
       }
       let settled = false;
-      const safeReject = (err) => { if (!settled) { settled = true; reject(err); } };
-      const safeResolve = (val) => { if (!settled) { settled = true; resolve(val); } };
+      const safeResolve = (value) => { if (!settled) { settled = true; resolve(value); } };
       const digits = (order.shippingAddress?.phone || '').replace(/\D/g, '');
       const phone = digits.length > 10 ? digits.slice(-10) : digits;
       const options = {
-        key: 'rzp_test_TEuU2eyjcwer1j',
+        key: 'rzp_test_TFjh4re4GuxRmE',
         amount: Math.round(advance * 100),
         currency: 'INR',
         name: 'Saran Jute Bags',
         description: `Order ${order.id}`,
-        handler: (response) => {
+        handler: async (response) => {
+          order.paidAmount = advance;
+          order.paymentStatus = 'Paid';
           order.paymentDetails = {
             razorpayPaymentId: response.razorpay_payment_id,
             razorpayOrderId: response.razorpay_order_id,
@@ -140,7 +260,8 @@ const CheckoutView = () => {
             paidAmount: advance,
             pendingAmount: isCustom ? Math.max(total - advance, 0) : 0,
           };
-          safeResolve(response);
+          updateOrder(order.id, { ...order }, order).catch(err => console.error('Failed to save paid status:', err));
+          safeResolve({ paid: true });
         },
         prefill: {
           name: order.shippingAddress?.name || '',
@@ -149,12 +270,12 @@ const CheckoutView = () => {
         },
         theme: { color: '#059669' },
         modal: {
-          ondismiss: () => safeReject(new Error('Payment cancelled by user')),
+          ondismiss: () => safeResolve({ paid: false }),
         },
       };
       const rzp = new window.Razorpay(options);
       rzp.on('payment.failed', (response) => {
-        safeReject(new Error(response.error?.description || 'Payment failed'));
+        console.warn('Razorpay payment attempt failed:', response.error?.description);
       });
       rzp.open();
     });
@@ -232,6 +353,31 @@ const CheckoutView = () => {
       return;
     }
 
+    // Stock validation
+    for (const item of cart) {
+      const product = products.find(p => String(p.id) === String(item.id));
+      if (product && product.stock !== undefined) {
+        if (product.stock <= 0) {
+          setPopup({
+            title: 'Out of Stock',
+            message: `${item.name} is out of stock and cannot be ordered.`,
+            primaryLabel: 'OK',
+            onPrimary: () => setPopup(null),
+          });
+          return;
+        }
+        if (item.quantity > product.stock) {
+          setPopup({
+            title: 'Insufficient Stock',
+            message: `Only ${product.stock} unit(s) of "${item.name}" are in stock. You requested ${item.quantity}. Please reduce the quantity.`,
+            primaryLabel: 'Fix Cart',
+            onPrimary: () => setPopup(null),
+          });
+          return;
+        }
+      }
+    }
+
     const firstItem = cart[0];
     const rawSku = firstItem?.sku || firstItem?.name || 'GEN';
     const sku = rawSku.replace(/[^A-Za-z0-9-]/g, '').substring(0, 12).toUpperCase();
@@ -259,6 +405,7 @@ const CheckoutView = () => {
       paymentMethod: paymentMethod === 'cod' ? 'COD' : 'Online Payment',
       status: 'Pending',
       trackingStage: 'pending',
+      trackingNumber: null,
       shippingAddress: {
         ...selectedAddress,
         email: user?.email || '',
@@ -268,14 +415,41 @@ const CheckoutView = () => {
     };
 
     try {
+      // Save order immediately with pending status
+      order.pendingAmount = isCustom ? Math.max(total - advance, 0) : 0;
+      order.paymentStatus = paymentMethod === 'cod' ? 'Pending' : 'Pending Payment';
+      await addOrder(order);
+
       if (paymentMethod === 'online' || isCustom) {
-        await handleRazorpayPayment(order);
-        order.paidAmount = advance;
+        const rzpResult = await handleRazorpayPayment(order);
+
+        if (!rzpResult.paid) {
+          setPopup({
+            title: 'Payment Cancelled',
+            message: `Your order ${orderId} is saved with "Pending Payment" status. You can complete payment later or contact us.`,
+            primaryLabel: 'View Order',
+            onPrimary: () => {
+              setPopup(null);
+              setLatestOrderItem(order);
+              clearCart();
+              navigate('/order-done');
+            },
+            secondaryLabel: 'Stay Here',
+            onSecondary: () => setPopup(null),
+          });
+          return;
+        }
       }
 
-      order.pendingAmount = isCustom ? Math.max(total - advance, 0) : 0;
+      // Deduct stock for each ordered item
+      for (const item of cart) {
+        const product = products.find(p => String(p.id) === String(item.id));
+        if (product && product.stock !== undefined) {
+          const newStock = Math.max(0, product.stock - item.quantity);
+          await updateProductStock(item.id, newStock, `Order ${orderId} placed`).catch(() => {});
+        }
+      }
 
-      await addOrder(order);
       setLatestOrderItem(order);
       clearCart();
       navigate('/order-done');
@@ -537,14 +711,21 @@ const CheckoutView = () => {
               <div className="space-y-3">
                 <button
                   type="button"
-                  onClick={() => setPaymentMethod('cod')}
-                  className={`w-full text-left rounded-xl p-4 border ${paymentMethod === 'cod' ? 'border-emerald-600 bg-emerald-50' : 'border-gray-200 bg-white'}`}
+                  onClick={() => { if (shippingDetails.codAvailable) setPaymentMethod('cod'); }}
+                  disabled={!shippingDetails.codAvailable}
+                  className={`w-full text-left rounded-xl p-4 border ${
+                    !shippingDetails.codAvailable
+                      ? 'border-gray-200 bg-gray-100 opacity-60 cursor-not-allowed'
+                      : paymentMethod === 'cod' ? 'border-emerald-600 bg-emerald-50' : 'border-gray-200 bg-white'
+                  }`}
                 >
                   <div className="flex items-start gap-3">
-                    <input readOnly type="radio" checked={paymentMethod === 'cod'} className="mt-1" />
+                    <input readOnly type="radio" checked={paymentMethod === 'cod'} className="mt-1" disabled={!shippingDetails.codAvailable} />
                     <div>
                       <p className="font-semibold text-gray-800 text-xs sm:text-sm">Cash on Delivery (COD)</p>
-                      {isCustom ? (
+                      {!shippingDetails.codAvailable ? (
+                        <p className="text-xs sm:text-sm text-amber-700">Not available for this delivery location</p>
+                      ) : isCustom ? (
                         <p className="text-xs sm:text-sm text-gray-600">Pay ₹100 advance now (Razorpay), balance ₹{balance.toFixed(2)} on delivery</p>
                       ) : (
                         <p className="text-xs sm:text-sm text-gray-600">Pay on delivery — no advance required</p>
@@ -572,9 +753,43 @@ const CheckoutView = () => {
               </div>
             </div>
 
-            <div className="flex items-start gap-3 rounded-xl bg-emerald-50 p-4">
-              <Wallet className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 mt-0.5" />
-              <p className="text-xs sm:text-sm text-gray-700">GST @ {pricingSettings.gstRate}% | Shipping: {shipping === 0 ? 'Free' : `₹${pricingSettings.shippingCharge}`} (Free above ₹{pricingSettings.freeShippingThreshold})</p>
+            <div className="space-y-3">
+              {/* Shipping via Delhivery */}
+              <div className="rounded-xl bg-emerald-50 p-4 space-y-2">
+                <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-700">
+                  <Truck className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    {shippingDetails.countryCode !== 'IN' ? (
+                      <>🌍 International ({getCountryName(shippingDetails.countryCode)}) · {shippingDetails.totalWeight.toFixed(2)} kg total</>
+                    ) : (
+                      <>📦 Domestic delivery · pincode {selectedAddress?.pincode || '—'}</>
+                    )}
+                  </span>
+                </div>
+                {delhiveryLoading ? (
+                  <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-500">
+                    <div className="w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                    Fetching shipping rate from Delhivery…
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-700">
+                      <Wallet className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>Shipping: {shipping === 0 ? 'Free' : `₹${shipping.toFixed(2)}`}{delhiveryCharge ? ' (Delhivery rate)' : ' (fallback rate)'}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-700">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>Est. delivery: <strong>{shippingDetails.estDelivery}</strong></span>
+                    </div>
+                  </>
+                )}
+                {!shippingDetails.codAvailable && (
+                  <div className="flex items-center gap-2 text-xs sm:text-sm text-amber-700">
+                    <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>COD not available — please use online payment</span>
+                  </div>
+                )}
+              </div>
             </div>
 
             <button onClick={handlePlaceOrder} className="mt-6 w-full btn-primary py-3 sm:py-4 text-sm sm:text-lg font-bold flex items-center justify-center gap-2">
@@ -607,7 +822,12 @@ const CheckoutView = () => {
               )}
               <div className="flex items-center justify-between">
                 <span className="text-gray-600 text-xs sm:text-sm">Shipping</span>
-                <span className="font-semibold text-gray-800 text-xs sm:text-sm">{shipping === 0 ? 'Free' : `₹${shipping}`}</span>
+                <span className="font-semibold text-gray-800 text-xs sm:text-sm">
+                  {shipping === 0 ? 'Free' : `₹${shipping.toFixed(2)}`}
+                </span>
+              </div>
+              <div className="text-[10px] text-gray-400 text-right">
+                {delhiveryCharge ? 'Delhivery rate' : 'Flat rate'} · est. {shippingDetails.estDelivery}
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-gray-600 text-xs sm:text-sm">GST ({pricingSettings.gstRate}%)</span>
@@ -618,13 +838,16 @@ const CheckoutView = () => {
                 <span className="text-lg sm:text-xl md:text-2xl font-bold text-gradient">₹{total.toFixed(2)}</span>
               </div>
             </div>
-            <div className="rounded-xl bg-white border border-emerald-100 p-3 sm:p-4 text-xs sm:text-sm text-gray-600">
+            <div className="rounded-xl bg-white border border-emerald-100 p-3 sm:p-4 text-xs sm:text-sm text-gray-600 space-y-1">
               {selectedAddress ? (
                 <>
-                  Deliver to: {selectedAddress.addressLine1}, {selectedAddress.city}, {selectedAddress.state} - {selectedAddress.pincode}
+                  <p>Deliver to: {selectedAddress.addressLine1}, {selectedAddress.city}, {selectedAddress.state} - {selectedAddress.pincode}</p>
+                  {shippingDetails.codAvailable === false && (
+                    <p className="text-amber-700 font-semibold">⚠ Online payment required for this location</p>
+                  )}
                 </>
               ) : (
-                'Pick a saved address or add a new one.'
+                <p>Pick a saved address or add a new one.</p>
               )}
             </div>
 

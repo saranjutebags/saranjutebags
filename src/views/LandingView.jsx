@@ -1,7 +1,8 @@
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowRight, MapPin, Star, ShoppingBag, Leaf, Globe, Truck, Shield,
-  Award, Zap, ChevronRight, Instagram, Facebook, Twitter, Mail, Phone, Heart, Package
+  Award, Zap, ChevronRight, Instagram, Facebook, Twitter, Mail, Phone, Heart, Package, Navigation
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useProducts } from '../contexts/ProductContext';
@@ -35,6 +36,28 @@ const LandingView = () => {
   const { products, categories, getFeaturedProducts, loading } = useProducts();
   const { addToCart, toggleWishlist, isInWishlist } = useCart();
   const navigate = useNavigate();
+  const [userLocation, setUserLocation] = useState(null);
+  const [locationName, setLocationName] = useState('');
+
+  useEffect(() => {
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          setUserLocation({ lat: latitude, lng: longitude });
+          fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&accept-language=en`)
+            .then(r => r.json())
+            .then(data => {
+              const addr = data.address;
+              setLocationName([addr.city_district || addr.city || addr.town, addr.state].filter(Boolean).join(', '));
+            })
+            .catch(() => setLocationName(''));
+        },
+        () => {},
+        { timeout: 5000, enableHighAccuracy: false }
+      );
+    }
+  }, []);
 
   const featuredProducts = getFeaturedProducts();
   // Only show visible, admin-created categories on the homepage
@@ -47,6 +70,16 @@ const LandingView = () => {
       <section className="relative min-h-[90vh] flex items-center overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-emerald-600 via-green-500 to-emerald-800" />
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.3),transparent_40%)]" />
+
+        {/* Location badge */}
+        {userLocation && (
+          <div className="absolute top-6 right-6 z-10">
+            <div className="flex items-center gap-2 bg-white/20 backdrop-blur-md text-white px-4 py-2 rounded-full text-xs sm:text-sm shadow-lg">
+              <Navigation className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="font-medium truncate max-w-[200px]">{locationName || `${userLocation.lat.toFixed(2)}, ${userLocation.lng.toFixed(2)}`}</span>
+            </div>
+          </div>
+        )}
 
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 w-full">
           <div className="grid lg:grid-cols-2 gap-12 items-center">

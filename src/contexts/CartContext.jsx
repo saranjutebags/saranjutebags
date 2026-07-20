@@ -57,6 +57,9 @@ export const CartProvider = ({ children }) => {
     shippingCharge: 40,
     freeShippingThreshold: 999,
   }));
+  const [warehouse, setWarehouse] = useState(null);
+  const [domesticShipping, setDomesticShipping] = useState(null);
+  const [internationalRates, setInternationalRates] = useState([]);
   const [cartToast, setCartToast] = useState(null);
   const seededDefaults = useRef(false);
   const [coupons, setCoupons] = useState(() => readJson(STORAGE_KEYS.coupons, [
@@ -212,9 +215,57 @@ export const CartProvider = ({ children }) => {
       }));
     });
 
+    const unsubWarehouse = onSnapshot(doc(db, 'settings', 'warehouse'), (snap) => {
+      if (snap.exists()) {
+        setWarehouse(snap.data());
+      } else {
+        setDoc(doc(db, 'settings', 'warehouse'), {
+          lat: 17.433333,
+          lng: 78.383333,
+          placeId: '',
+          name: 'Main Warehouse',
+          phone: '+91 9876543210',
+          address: 'Mehdipatnam, Hyderabad, Telangana 500028',
+          pincode: '500028',
+          active: true,
+        }).catch(() => undefined);
+      }
+    }, () => setWarehouse(null));
+
+    const unsubDomestic = onSnapshot(doc(db, 'settings', 'domesticShipping'), (snap) => {
+      if (snap.exists()) {
+        setDomesticShipping(snap.data());
+      } else {
+        setDoc(doc(db, 'settings', 'domesticShipping'), {
+          baseCharge: 40,
+          perKm: 8,
+          freeDeliveryAbove: 5000,
+        }).catch(() => undefined);
+      }
+    }, () => setDomesticShipping(null));
+
+    const unsubInternational = onSnapshot(doc(db, 'settings', 'internationalShipping'), (snap) => {
+      if (snap.exists()) {
+        setInternationalRates(snap.data().rates || []);
+      } else {
+        const defaultRates = [
+          { country: 'USA', code: 'US', ratePerKg: 420, currency: 'USD', minCharge: 1000, estimatedDays: '7-10' },
+          { country: 'UK', code: 'GB', ratePerKg: 390, currency: 'GBP', minCharge: 800, estimatedDays: '7-10' },
+          { country: 'UAE', code: 'AE', ratePerKg: 220, currency: 'AED', minCharge: 500, estimatedDays: '5-7' },
+          { country: 'Australia', code: 'AU', ratePerKg: 450, currency: 'AUD', minCharge: 1000, estimatedDays: '10-14' },
+          { country: 'Germany', code: 'DE', ratePerKg: 400, currency: 'EUR', minCharge: 900, estimatedDays: '7-10' },
+        ];
+        setInternationalRates(defaultRates);
+        setDoc(doc(db, 'settings', 'internationalShipping'), { rates: defaultRates }).catch(() => undefined);
+      }
+    }, () => setInternationalRates([]));
+
     return () => {
       unsubCoupons();
       unsubPricing();
+      unsubWarehouse();
+      unsubDomestic();
+      unsubInternational();
     };
   }, []);
 
@@ -458,6 +509,30 @@ export const CartProvider = ({ children }) => {
     }
   };
 
+  const updateWarehouse = (updates) => {
+    if (isFirebaseActive) {
+      setDoc(doc(db, 'settings', 'warehouse'), { ...warehouse, ...updates }).catch(() => undefined);
+    } else {
+      setWarehouse(prev => prev ? { ...prev, ...updates } : updates);
+    }
+  };
+
+  const updateDomesticShipping = (updates) => {
+    if (isFirebaseActive) {
+      setDoc(doc(db, 'settings', 'domesticShipping'), { ...domesticShipping, ...updates }).catch(() => undefined);
+    } else {
+      setDomesticShipping(prev => prev ? { ...prev, ...updates } : updates);
+    }
+  };
+
+  const updateInternationalShipping = (rates) => {
+    if (isFirebaseActive) {
+      setDoc(doc(db, 'settings', 'internationalShipping'), { rates }).catch(() => undefined);
+    } else {
+      setInternationalRates(rates);
+    }
+  };
+
   const calculateOrderPricing = (subtotal, discountAmount = 0) => {
     const shipping = subtotal >= pricingSettings.freeShippingThreshold ? 0 : pricingSettings.shippingCharge;
     const taxableAmount = Math.max(subtotal - discountAmount, 0);
@@ -548,6 +623,9 @@ export const CartProvider = ({ children }) => {
     cartToast,
     coupons,
     pricingSettings,
+    warehouse,
+    domesticShipping,
+    internationalRates,
     addToCart,
     updateQuantity,
     removeFromCart,
@@ -563,6 +641,9 @@ export const CartProvider = ({ children }) => {
     cancelOrder,
     deleteOrders,
     updatePricingSettings,
+    updateWarehouse,
+    updateDomesticShipping,
+    updateInternationalShipping,
     calculateOrderPricing,
     setLatestOrderItem,
     clearOrders,

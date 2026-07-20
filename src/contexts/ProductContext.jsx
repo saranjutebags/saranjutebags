@@ -91,6 +91,7 @@ export const ProductProvider = ({ children }) => {
       id: createProductId(),
       archived: false,
       visible: true,
+      weightPerPiece: Number(product.weightPerPiece) || 0,
       featured: Boolean(product.featured),
       bestseller: Boolean(product.bestseller),
       newArrival: Boolean(product.newArrival),

@@ -250,7 +250,7 @@ const ProductView = () => {
 
             <p className="text-gray-700 text-lg mb-8 leading-relaxed">{product.description}</p>
 
-            <div className="grid grid-cols-2 gap-4 mb-8">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-8">
               <div className="glass rounded-xl p-4 border border-emerald-100">
                 <p className="text-gray-500 text-sm mb-1">Material</p>
                 <p className="font-semibold text-gray-800">{product.material}</p>
@@ -274,6 +274,10 @@ const ProductView = () => {
                     <Check className="w-4 h-4" /> In Stock ({product.stock})
                   </p>
                 )}
+              </div>
+              <div className="glass rounded-xl p-4 border border-emerald-100">
+                <p className="text-gray-500 text-sm mb-1">Weight</p>
+                <p className="font-semibold text-gray-800">{product.weightPerPiece ? `${product.weightPerPiece} kg/piece` : 'N/A'}</p>
               </div>
             </div>
 
@@ -336,10 +340,11 @@ const ProductView = () => {
             <div className="flex flex-col sm:flex-row gap-4 mb-8">
               <button
                 onClick={handleAddToCart}
-                className="flex-1 btn-primary py-4 text-lg font-bold flex items-center justify-center gap-2"
+                disabled={product.stock !== undefined && product.stock <= 0}
+                className={`flex-1 py-4 text-lg font-bold flex items-center justify-center gap-2 ${product.stock !== undefined && product.stock <= 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed rounded-xl' : 'btn-primary'}`}
               >
                 <ShoppingBag className="w-6 h-6" />
-                Add to Cart
+                {product.stock !== undefined && product.stock <= 0 ? 'Out of Stock' : 'Add to Cart'}
               </button>
               <button
                 onClick={() => toggleWishlist(product)}

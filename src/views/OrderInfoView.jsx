@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { AlertTriangle, ArrowLeft, MapPin, ShoppingBag, Truck, X, Download, Eye } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ExternalLink, MapPin, ShoppingBag, Truck, X, Download, Eye } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 import { useAdmin } from '../contexts/AdminContext';
@@ -8,6 +8,7 @@ import { useProducts } from '../contexts/ProductContext';
 import { getItemImage } from '../utils/orderImageUtils';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
+import { isDelhiveryActive, trackOrder } from '../services/delhivery';
 
 const trackingSteps = [
   { key: 'pending', label: 'Pending', desc: 'Order is awaiting confirmation', gif: '/confirmed.gif' },
@@ -56,8 +57,23 @@ const OrderInfoView = () => {
   const [cancelReason, setCancelReason] = useState(cancelReasons[0]);
   const [otherReason, setOtherReason] = useState('');
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [trackingInfo, setTrackingInfo] = useState(null);
+  const [trackingLoading, setTrackingLoading] = useState(false);
 
   const order = useMemo(() => orders.find((item) => item.id === id), [id, orders]);
+
+  useEffect(() => {
+    if (!order?.trackingNumber || !isDelhiveryActive()) {
+      setTrackingInfo(null);
+      return;
+    }
+    let cancelled = false;
+    setTrackingLoading(true);
+    trackOrder(order.trackingNumber)
+      .then((data) => { if (!cancelled) { setTrackingInfo(data); setTrackingLoading(false); } })
+      .catch(() => { if (!cancelled) { setTrackingInfo(null); setTrackingLoading(false); } });
+    return () => { cancelled = true; };
+  }, [order?.trackingNumber]);
 
   if (!order) {
     return (
@@ -393,6 +409,25 @@ const OrderInfoView = () => {
                   })}
                 </div>
 
+                {order.trackingNumber && (
+                  <div className="mt-2 rounded-2xl bg-blue-50 border border-blue-100 p-4 text-sm text-gray-700">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <span>
+                        Tracking #: <span className="font-mono font-semibold text-gray-900">{order.trackingNumber}</span>
+                        {trackingLoading && <span className="text-gray-400 ml-2">(loading…)</span>}
+                      </span>
+                      <a
+                        href={`https://www.delhivery.com/tracking/${order.trackingNumber}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-semibold"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        Track on Delhivery
+                      </a>
+                    </div>
+                  </div>
+                )}
                 <div className="mt-2 rounded-2xl bg-emerald-50 border border-emerald-100 p-4 text-sm text-gray-700">
                   Current status: <span className="font-semibold text-gray-900">{order.status}</span>
                 </div>
