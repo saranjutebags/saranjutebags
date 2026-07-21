@@ -1,9 +1,4 @@
 {
-  "functions": {
-    "api/delhivery.js": { "runtime": "nodejs20.x" },
-    "api/create-order.js": { "runtime": "nodejs20.x" },
-    "api/verify-payment.js": { "runtime": "nodejs20.x" }
-  },
   "rewrites": [
     { "source": "/api/delhivery/:path*", "destination": "/api/delhivery" },
     { "source": "/api/create-order", "destination": "/api/create-order" },
