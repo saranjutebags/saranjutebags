@@ -23,6 +23,7 @@ export const fetchWaybill = async (count = 1, clientName = '') => {
 export const createShipment = async (shipmentPayload) => {
   if (!API_KEY) return null;
   const formBody = `format=json&data=${encodeURIComponent(JSON.stringify(shipmentPayload))}`;
+  console.log('[Delhivery] Sending shipment payload:', JSON.stringify(shipmentPayload));
   const response = await fetch(apiUrl('/api/cmu/create.json'), {
     method: 'POST',
     headers: {
@@ -31,8 +32,17 @@ export const createShipment = async (shipmentPayload) => {
     },
     body: formBody,
   });
+  const result = await response.json();
+  console.log('[Delhivery] Shipment response:', result);
   if (!response.ok) throw new Error(`Delhivery shipment error: ${response.status}`);
-  return response.json();
+  const packages = result?.packages || result?.data?.packages || [];
+  if (result?.success === false || result?.errors?.length > 0) {
+    throw new Error(`Delhivery shipment failed: ${(result.errors || []).join(', ') || JSON.stringify(result)}`);
+  }
+  if (!packages.length && !result?.waybill) {
+    console.warn('[Delhivery] Shipment response has no packages:', result);
+  }
+  return result;
 };
 
 // ─── Pickup Request ────────────────────────────────────────
