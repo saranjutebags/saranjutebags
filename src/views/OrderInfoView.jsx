@@ -52,7 +52,7 @@ const OrderInfoView = () => {
   const navigate = useNavigate();
   const { orders, cancelOrder } = useCart();
   const { companySettings } = useAdmin();
-  const { products } = useProducts();
+  const { products, updateProductStock } = useProducts();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState(cancelReasons[0]);
   const [otherReason, setOtherReason] = useState('');
@@ -243,6 +243,17 @@ const OrderInfoView = () => {
 
     if (!finalReason) {
       return;
+    }
+
+    // Restore stock for each item
+    if (order?.items) {
+      order.items.forEach(item => {
+        const product = products.find(p => String(p.id) === String(item.id));
+        if (product && product.stock !== undefined) {
+          const restored = (product.stock || 0) + (item.quantity || 1);
+          updateProductStock(item.id, restored, `Stock restored from cancelled order ${order.id}`).catch(() => {});
+        }
+      });
     }
 
     cancelOrder(order.id, finalReason);

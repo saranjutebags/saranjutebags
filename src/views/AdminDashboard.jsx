@@ -50,7 +50,7 @@ import {
 
 const AdminDashboard = () => {
   const { user, signOut } = useAuth();
-  const { products, categories, addProduct, updateProduct, deleteProduct, addCategory, updateCategory, deleteCategory, toggleCategoryVisibility, deleteProductReview, toggleReviewVisibility } = useProducts();
+  const { products, categories, addProduct, updateProduct, deleteProduct, addCategory, updateCategory, deleteCategory, toggleCategoryVisibility, deleteProductReview, toggleReviewVisibility, updateProductStock } = useProducts();
   const { orders, updateOrder, deleteOrders } = useCart();
   const { pricingSettings, updatePricingSettings, warehouse, domesticShipping, internationalRates, updateWarehouse, updateDomesticShipping, updateInternationalShipping } = useCart();
   const { companySettings, updateCompanySettings, banners, addBanner, updateBanner, deleteBanner, scrollingTexts, addScrollingText, updateScrollingText, deleteScrollingText, activityLogs, addActivityLog } = useAdmin();
@@ -431,6 +431,16 @@ const AdminDashboard = () => {
       if (status === 'Cancelled') {
         updateData.cancelReason = cancelReason;
         updateData.cancelledAt = new Date().toLocaleString();
+        // Restore stock for each item
+        if (order?.items) {
+          order.items.forEach(item => {
+            const product = products.find(p => String(p.id) === String(item.id));
+            if (product && product.stock !== undefined) {
+              const restored = (product.stock || 0) + (item.quantity || 1);
+              updateProductStock(item.id, restored, `Stock restored from cancelled order ${orderId}`).catch(() => {});
+            }
+          });
+        }
       }
       await updateOrder(orderId, updateData, order);
       addActivityLog(`Updated order ${orderId} status to ${status}`, user?.email);
@@ -464,10 +474,11 @@ const AdminDashboard = () => {
 
       showMessage('Fetching waybill from Delhivery…');
 
-      const waybillData = await fetchWaybill(1);
-      const waybills = waybillData?.waybills || waybillData?.data?.waybills || [];
+      const waybillData = await fetchWaybill(1, companySettings?.companyName);
+      const waybills = waybillData?.waybills || waybillData?.data?.waybills || (waybillData?.waybill ? [waybillData.waybill] : []);
       if (!waybills.length) {
-        throw new Error('No waybill returned from Delhivery');
+        console.warn('Delhivery waybill response:', waybillData);
+        throw new Error('No waybill returned from Delhivery. Check API key and account configuration.');
       }
       const waybill = waybills[0];
 

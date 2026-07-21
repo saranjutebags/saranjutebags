@@ -1,12 +1,5 @@
 const API_KEY = import.meta.env.VITE_DELHIVERY_API_KEY || '';
-const PROXY_PREFIX = '/api/delhivery';
-const DIRECT_URL = 'https://track.delhivery.com';
-const isDev = import.meta.env.DEV;
-
-const apiUrl = (path) => {
-  const full = `${DIRECT_URL}${path}`;
-  return isDev ? `${PROXY_PREFIX}${path}` : full;
-};
+const apiUrl = (path) => `/api/delhivery${path}`;
 
 const authHeader = () => ({
   Authorization: `Token ${API_KEY}`,
@@ -15,9 +8,11 @@ const authHeader = () => ({
 export const isDelhiveryActive = () => Boolean(API_KEY);
 
 // ─── Waybill ───────────────────────────────────────────────
-export const fetchWaybill = async (count = 1) => {
+export const fetchWaybill = async (count = 1, clientName = '') => {
   if (!API_KEY) return null;
-  const response = await fetch(apiUrl(`/waybill/api/fetch/json/?count=${count}`), { headers: authHeader() });
+  const params = new URLSearchParams({ count: String(count) });
+  if (clientName) params.set('cl', clientName);
+  const response = await fetch(apiUrl(`/waybill/api/fetch/json/?${params}`), { headers: authHeader() });
   if (!response.ok) throw new Error(`Delhivery waybill error: ${response.status}`);
   return response.json();
 };

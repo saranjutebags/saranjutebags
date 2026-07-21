@@ -288,16 +288,35 @@ export const CartProvider = ({ children }) => {
 
   // ─── Cart ────────────────────────────────────────────────────────────────────
   const addToCart = (product, quantity = 1, customText = '', customLogo = '') => {
+    let blocked = false;
     setCart(prev => {
+      if (product.stock !== undefined && product.stock <= 0) {
+        blocked = true;
+        setCartToast({ id: product.id, name: product.name, quantity: 0, error: 'Out of stock' });
+        return prev;
+      }
       const existingIndex = prev.findIndex(item => item.id === product.id && item.customText === customText && item.customLogo === customLogo);
       if (existingIndex > -1) {
+        const newQty = prev[existingIndex].quantity + quantity;
+        if (product.stock !== undefined && newQty > product.stock) {
+          blocked = true;
+          setCartToast({ id: product.id, name: product.name, quantity: 0, error: `Only ${product.stock} available` });
+          return prev;
+        }
         const updated = [...prev];
-        updated[existingIndex].quantity += quantity;
+        updated[existingIndex].quantity = newQty;
         return updated;
+      }
+      if (product.stock !== undefined && quantity > product.stock) {
+        blocked = true;
+        setCartToast({ id: product.id, name: product.name, quantity: 0, error: `Only ${product.stock} available` });
+        return prev;
       }
       return [...prev, { ...product, quantity, customText, customLogo }];
     });
-    setCartToast({ id: product.id, name: product.name, quantity });
+    if (!blocked) {
+      setCartToast({ id: product.id, name: product.name, quantity });
+    }
   };
 
   const updateQuantity = (productId, quantity) => {

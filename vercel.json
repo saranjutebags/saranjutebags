@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/api/delhivery/:path*", "destination": "/api/delhivery" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

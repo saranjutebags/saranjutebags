@@ -248,7 +248,7 @@ const CheckoutView = () => {
         currency: 'INR',
         name: 'Saran Jute Bags',
         description: `Order ${order.id}`,
-        handler: async (response) => {
+        handler: (response) => {
           order.paidAmount = advance;
           order.paymentStatus = 'Paid';
           order.paymentDetails = {
@@ -260,7 +260,6 @@ const CheckoutView = () => {
             paidAmount: advance,
             pendingAmount: isCustom ? Math.max(total - advance, 0) : 0,
           };
-          updateOrder(order.id, { ...order }, order).catch(err => console.error('Failed to save paid status:', err));
           safeResolve({ paid: true });
         },
         prefill: {
@@ -415,30 +414,26 @@ const CheckoutView = () => {
     };
 
     try {
-      // Save order immediately with pending status
       order.pendingAmount = isCustom ? Math.max(total - advance, 0) : 0;
-      order.paymentStatus = paymentMethod === 'cod' ? 'Pending' : 'Pending Payment';
-      await addOrder(order);
 
       if (paymentMethod === 'online' || isCustom) {
+        order.paymentStatus = 'Pending Payment';
         const rzpResult = await handleRazorpayPayment(order);
 
         if (!rzpResult.paid) {
           setPopup({
             title: 'Payment Cancelled',
-            message: `Your order ${orderId} is saved with "Pending Payment" status. You can complete payment later or contact us.`,
-            primaryLabel: 'View Order',
-            onPrimary: () => {
-              setPopup(null);
-              setLatestOrderItem(order);
-              clearCart();
-              navigate('/order-done');
-            },
-            secondaryLabel: 'Stay Here',
-            onSecondary: () => setPopup(null),
+            message: 'Your payment was cancelled. No order has been created.',
+            primaryLabel: 'OK',
+            onPrimary: () => setPopup(null),
           });
           return;
         }
+        // order.paymentStatus is now 'Paid' (set by handler)
+        await addOrder(order);
+      } else {
+        order.paymentStatus = 'Pending';
+        await addOrder(order);
       }
 
       // Deduct stock for each ordered item
