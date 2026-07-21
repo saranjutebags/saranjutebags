@@ -173,6 +173,10 @@ const AdminDashboard = () => {
   // Order details modal
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [delhiveryShipping, setDelhiveryShipping] = useState(false);
+  const [showShipForm, setShowShipForm] = useState(false);
+  const [shipTargetOrder, setShipTargetOrder] = useState(null);
+  const [shipPackageType, setShipPackageType] = useState('Plastic Cover/Flyer');
+  const [shipWeight, setShipWeight] = useState('');
 
   // Theme
   const [themeColors, setThemeColors] = useState({
@@ -451,7 +455,7 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleShipWithDelhivery = async (order) => {
+  const handleShipWithDelhivery = async (order, packageType = 'Plastic Cover/Flyer', weightGrams = 1000) => {
     if (!isDelhiveryActive()) {
       showMessage('Delhivery API key not configured', 'error');
       return;
@@ -467,11 +471,6 @@ const AdminDashboard = () => {
 
     setDelhiveryShipping(true);
     try {
-      const items = order.items || [];
-      const totalWeightGrams = Math.round(
-        Math.max(items.reduce((sum, item) => sum + (item.weightPerPiece || 1) * (item.quantity || 1), 0) * 1000, 1000)
-      );
-
       showMessage('Fetching waybill from Delhivery…');
 
       const waybillData = await fetchWaybill(1, companySettings?.companyName);
@@ -485,40 +484,36 @@ const AdminDashboard = () => {
       showMessage(`Waybill ${waybill} obtained. Creating shipment…`);
 
       const paymentMode = order.paymentMethod === 'COD' ? 'COD' : 'Prepaid';
+      const items = order.items || [];
+      const productsDesc = items.map(item => `${item.name || ''} x${item.quantity || 1}`).join(', ') || 'Jute Bags';
+      const totalQty = items.reduce((sum, item) => sum + (item.quantity || 1), 0) || 1;
 
       const shipmentPayload = {
         shipments: [
           {
             waybill,
-            order_id: order.id,
+            order: order.id,
             name: order.shippingAddress.name || '',
             phone: (order.shippingAddress.phone || '').replace(/\D/g, '').slice(-10),
-            address: order.shippingAddress.addressLine1 || '',
-            address_2: order.shippingAddress.addressLine2 || '',
+            add: `${order.shippingAddress.addressLine1 || ''}${order.shippingAddress.addressLine2 ? ', ' + order.shippingAddress.addressLine2 : ''}`,
+            pin: order.shippingAddress.pincode,
             city: order.shippingAddress.city || '',
             state: order.shippingAddress.state || '',
             country: 'India',
-            pincode: order.shippingAddress.pincode,
             payment_mode: paymentMode,
             cod_amount: paymentMode === 'COD' ? Math.round(order.grandTotal || order.total || 0) : 0,
             total_amount: Math.round(order.grandTotal || order.total || 0),
-            weight: totalWeightGrams,
+            weight: String(weightGrams),
+            products_desc: productsDesc,
+            quantity: String(totalQty),
             seller_name: companySettings?.companyName || 'Saran Jute Bags',
-            seller_address: warehouse.address || '',
-            seller_city: (warehouse.address || '').split(',')[1]?.trim() || 'Hyderabad',
-            seller_state: (warehouse.address || '').split(',')[2]?.split(' ')[0]?.trim() || 'Telangana',
-            seller_pincode: warehouse.pincode,
-            seller_phone: (warehouse.phone || '').replace(/\D/g, '').slice(-10),
-            pickup_location: warehouse.name || 'Main Warehouse',
+            seller_add: warehouse.address || '',
+            shipping_mode: 'Surface',
+            plastic_packaging: packageType === 'Plastic Cover/Flyer' ? true : false,
           },
         ],
         pickup_location: {
           name: warehouse.name || 'Main Warehouse',
-          address: warehouse.address || '',
-          city: (warehouse.address || '').split(',')[1]?.trim() || 'Hyderabad',
-          state: (warehouse.address || '').split(',')[2]?.split(' ')[0]?.trim() || 'Telangana',
-          pincode: warehouse.pincode,
-          phone: (warehouse.phone || '').replace(/\D/g, '').slice(-10),
         },
       };
 
@@ -529,7 +524,7 @@ const AdminDashboard = () => {
       const chargeResult = await calculateShippingCharge({
         originPin: warehouse.pincode,
         destPin: order.shippingAddress.pincode,
-        weightGrams: totalWeightGrams,
+        weightGrams,
         isCOD: paymentMode === 'COD',
       });
 
@@ -544,7 +539,7 @@ const AdminDashboard = () => {
         grandTotal: updatedGrandTotal,
         total: updatedGrandTotal,
         status: 'Shipped',
-        delhiveryShipment: { waybill, shippedAt: new Date().toISOString(), charge: updatedShipping },
+        delhiveryShipment: { waybill, shippedAt: new Date().toISOString(), charge: updatedShipping, packageType, weightGrams },
       }, order);
 
       showMessage('Requesting pickup…');
@@ -3373,7 +3368,7 @@ const AdminDashboard = () => {
                     <div className="space-y-3">
                       <p className="text-sm text-gray-600">Ready to ship this order via Delhivery?</p>
                       <button
-                        onClick={() => handleShipWithDelhivery(selectedOrder)}
+                        onClick={() => { setShipTargetOrder(selectedOrder); setShowShipForm(true); }}
                         disabled={delhiveryShipping}
                         className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-all text-sm font-semibold flex items-center justify-center gap-2"
                       >
@@ -3550,6 +3545,94 @@ const AdminDashboard = () => {
                   </button>
                 </div>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Ship with Delhivery Form Modal */}
+      <AnimatePresence>
+        {showShipForm && shipTargetOrder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setShowShipForm(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                  <Truck className="w-5 h-5 text-blue-600" />
+                  Ship with Delhivery
+                </h2>
+                <button onClick={() => setShowShipForm(false)} className="p-2 hover:bg-gray-100 rounded-full">
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+              {(() => {
+                const items = shipTargetOrder.items || [];
+                const defaultWeight = Math.round(
+                  Math.max(items.reduce((sum, item) => sum + (item.weightPerPiece || 1) * (item.quantity || 1), 0) * 1000, 1000)
+                );
+                return (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Package Type</label>
+                      <select
+                        value={shipPackageType}
+                        onChange={(e) => setShipPackageType(e.target.value)}
+                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="Plastic Cover/Flyer">Plastic Cover/Flyer</option>
+                        <option value="Cardboard Box">Cardboard Box</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Weight (grams)</label>
+                      <input
+                        type="number"
+                        value={shipWeight || defaultWeight}
+                        onChange={(e) => setShipWeight(e.target.value)}
+                        min={1}
+                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">Calculated from order items: {defaultWeight}g. Adjust if needed.</p>
+                    </div>
+                    <div className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3 space-y-1">
+                      <p><strong>Order:</strong> {shipTargetOrder.id}</p>
+                      <p><strong>Customer:</strong> {shipTargetOrder.shippingAddress?.name}</p>
+                      <p><strong>From:</strong> {warehouse?.name} ({warehouse?.pincode})</p>
+                      <p><strong>To:</strong> {shipTargetOrder.shippingAddress?.city}, {shipTargetOrder.shippingAddress?.pincode}</p>
+                    </div>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setShowShipForm(false)}
+                        className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-all"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={async () => {
+                          setShowShipForm(false);
+                          await handleShipWithDelhivery(shipTargetOrder, shipPackageType, Number(shipWeight || defaultWeight));
+                        }}
+                        disabled={delhiveryShipping}
+                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                      >
+                        <Truck className="w-4 h-4" />
+                        Confirm & Ship
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </motion.div>
           </div>
         )}
