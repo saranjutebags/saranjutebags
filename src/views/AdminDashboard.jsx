@@ -3336,6 +3336,12 @@ const AdminDashboard = () => {
 
                   {selectedOrder.trackingNumber ? (
                     <div className="space-y-3">
+                      {selectedOrder.delhiveryShipment && (
+                        <div className="bg-emerald-600 text-white rounded-xl p-4 text-center">
+                          <p className="text-lg font-bold">✓ Shipment Created</p>
+                          <p className="text-sm text-emerald-100 mt-1">Delhivery waybill generated and order manifested</p>
+                        </div>
+                      )}
                       <div className="flex items-center gap-3">
                         <input
                           type="text"
@@ -3360,6 +3366,7 @@ const AdminDashboard = () => {
                       </div>
                       <p className="text-xs text-emerald-700 bg-emerald-100 rounded-lg px-3 py-2">
                         ✓ Shipped via Delhivery — waybill {selectedOrder.trackingNumber}
+                        {selectedOrder.delhiveryShipment?.charge > 0 && ` — Actual charge: ₹${selectedOrder.delhiveryShipment.charge}`}
                       </p>
                     </div>
                   ) : (

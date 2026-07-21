@@ -421,19 +421,24 @@ const OrderInfoView = () => {
                 </div>
 
                 {order.trackingNumber && (
-                  <div className="mt-2 rounded-2xl bg-blue-50 border border-blue-100 p-4 text-sm text-gray-700">
-                    <div className="flex items-center justify-between gap-3 flex-wrap">
-                      <span>
-                        Tracking #: <span className="font-mono font-semibold text-gray-900">{order.trackingNumber}</span>
-                        {trackingLoading && <span className="text-gray-400 ml-2">(loading…)</span>}
+                  <div className="mt-2 rounded-2xl bg-emerald-600 text-white p-5">
+                    <div className="text-center mb-3">
+                      <Truck className="w-8 h-8 mx-auto mb-1" />
+                      <p className="text-lg font-bold">✓ Shipped via Delhivery</p>
+                      <p className="text-sm text-emerald-100">Your order has been handed over to Delhivery for delivery</p>
+                    </div>
+                    <div className="bg-white/10 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
+                      <span className="text-sm">
+                        Waybill: <span className="font-mono font-semibold">{order.trackingNumber}</span>
+                        {trackingLoading && <span className="text-emerald-200 ml-2">(loading…)</span>}
                       </span>
                       <a
                         href={`https://www.delhivery.com/tracking/${order.trackingNumber}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs font-semibold"
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-white text-emerald-700 rounded-lg hover:bg-emerald-50 transition-colors text-sm font-semibold"
                       >
-                        <ExternalLink className="w-3.5 h-3.5" />
+                        <ExternalLink className="w-4 h-4" />
                         Track on Delhivery
                       </a>
                     </div>
