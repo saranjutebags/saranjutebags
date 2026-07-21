@@ -1,7 +1,17 @@
 export default async (req, res) => {
+  console.log('[DelhiveryProxy] req.url:', req.url);
+  console.log('[DelhiveryProxy] req.method:', req.method);
+  console.log('[DelhiveryProxy] req.headers:', JSON.stringify(req.headers));
+
   const url = new URL(req.url, 'http://localhost');
-  const subPath = url.pathname.replace(/^\/api\/delhivery\//, '');
+  const pathname = url.pathname;
+  let subPath = pathname.replace(/^\/api\/delhivery\//, '');
+  if (subPath === pathname) {
+    subPath = pathname.replace(/^\/api\/delhivery/, '');
+  }
+  subPath = subPath.replace(/^\/+/, '');
   const targetUrl = `https://track.delhivery.com/${subPath}${url.search}`;
+  console.log('[DelhiveryProxy] targetUrl:', targetUrl);
 
   const headers = {};
   if (req.headers.authorization) {
@@ -29,6 +39,7 @@ export default async (req, res) => {
     res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
     res.status(response.status).send(responseBody);
   } catch (error) {
-    res.status(500).json({ error: 'Delhivery proxy error', message: error.message });
+    console.error('[DelhiveryProxy] Fetch error:', error.message);
+    res.status(500).json({ error: 'Delhivery proxy error', message: error.message, url: targetUrl });
   }
 };
