@@ -12,7 +12,7 @@ import { convertFileToBase64, validateImageFile, compressImage } from '../utils/
 import { getItemImage } from '../utils/orderImageUtils';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
-import { isDelhiveryActive, fetchWaybill, createShipment, requestPickup, calculateShippingCharge } from '../services/delhivery';
+import { isDelhiveryActive, fetchWaybill, createShipment, requestPickup, calculateShippingCharge, registerWarehouse } from '../services/delhivery';
 import {
   LayoutDashboard,
   Package,
@@ -194,6 +194,7 @@ const AdminDashboard = () => {
   const [editingCategory, setEditingCategory] = useState(null);
   const [categoryForm, setCategoryForm] = useState(emptyCategoryForm);
   const [categoryImageUploading, setCategoryImageUploading] = useState(false);
+  const [warehouseRegLoading, setWarehouseRegLoading] = useState(false);
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -455,12 +456,53 @@ const AdminDashboard = () => {
     }
   };
 
+  const handleRegisterWarehouse = async () => {
+    if (!isDelhiveryActive()) { showMessage('Delhivery API key not configured', 'error'); return; }
+    if (!warehouse?.name?.trim() || !warehouse?.pincode || !warehouse?.phone || !warehouse?.email) {
+      showMessage('Please set warehouse name, pincode, phone, and email in settings first', 'error');
+      return;
+    }
+    setWarehouseRegLoading(true);
+    try {
+      const addrParts = (warehouse.address || '').split(',').map(s => s.trim());
+      const city = addrParts[1] || 'Hyderabad';
+      const stateRaw = addrParts[2] || 'Telangana';
+      const state = stateRaw.split(' ')[0] || 'Telangana';
+      const cityClean = city || 'Hyderabad';
+      const stateClean = state || 'Telangana';
+      const payload = {
+        name: warehouse.name.trim(),
+        registered_name: warehouse.name.trim(),
+        address: addrParts[0] || warehouse.name.trim(),
+        city: cityClean,
+        country: 'India',
+        pin: warehouse.pincode,
+        phone: (warehouse.phone || '').replace(/\D/g, '').slice(-10),
+        email: warehouse.email,
+        return_address: addrParts[0] || warehouse.name.trim(),
+        return_city: cityClean,
+        return_state: stateClean,
+        return_pin: warehouse.pincode,
+        return_country: 'India',
+      };
+      console.log('[Delhivery] Registering warehouse:', JSON.stringify(payload, null, 2));
+      const result = await registerWarehouse(payload);
+      console.log('[Delhivery] Warehouse registration result:', result);
+      showMessage('Warehouse registered with Delhivery successfully!');
+    } catch (err) {
+      console.error('[Delhivery] Warehouse registration error:', err);
+      showMessage(`Warehouse registration failed: ${err.message}`, 'error');
+    } finally {
+      setWarehouseRegLoading(false);
+    }
+  };
+
   const handleShipWithDelhivery = async (order, packageType = 'Plastic Cover/Flyer', weightGrams = 1000) => {
     if (!isDelhiveryActive()) {
       showMessage('Delhivery API key not configured', 'error');
       return;
     }
-    if (!warehouse?.pincode || !warehouse?.name || !warehouse?.phone) {
+    if (!warehouse?.pincode || !warehouse?.name?.trim() || !warehouse?.phone) {
       showMessage('Please set warehouse name, phone, and pincode in settings first', 'error');
       return;
     }
@@ -513,7 +555,7 @@ const AdminDashboard = () => {
           },
         ],
         pickup_location: {
-          name: warehouse.name || 'Main Warehouse',
+          name: (warehouse.name || '').trim() || 'Main Warehouse',
         },
       };
 
@@ -2491,7 +2533,7 @@ const AdminDashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1">
             <label className="block text-sm font-medium text-gray-700">Warehouse Name (Pickup Location)</label>
-            <input type="text" value={warehouse?.name || ''} onChange={(e) => updateWarehouse({ name: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="e.g. Main Warehouse" />
+            <input type="text" value={warehouse?.name || ''} onChange={(e) => updateWarehouse({ name: e.target.value })} onBlur={(e) => updateWarehouse({ name: e.target.value.trim() })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="e.g. Saran Jute Bags" />
           </div>
           <div className="space-y-1">
             <label className="block text-sm font-medium text-gray-700">Pickup Phone</label>
@@ -2517,11 +2559,21 @@ const AdminDashboard = () => {
             <label className="block text-sm font-medium text-gray-700">Pincode</label>
             <input type="text" value={warehouse?.pincode || ''} onChange={(e) => updateWarehouse({ pincode: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="e.g. 500028" />
           </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Company Email (required for Delhivery)</label>
+            <input type="email" value={warehouse?.email || ''} onChange={(e) => updateWarehouse({ email: e.target.value })} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="e.g. info@saaranbags.com" />
+          </div>
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" checked={warehouse?.active !== false} onChange={(e) => updateWarehouse({ active: e.target.checked })} className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" />
               <span className="text-sm font-medium text-gray-700">Warehouse active</span>
             </label>
+          </div>
+          <div className="md:col-span-2 flex items-center gap-3">
+            <button onClick={handleRegisterWarehouse} disabled={warehouseRegLoading} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium">
+              {warehouseRegLoading ? 'Registering…' : 'Register Warehouse with Delhivery'}
+            </button>
+            {warehouse?.name && <span className="text-xs text-gray-500">Name: &quot;{warehouse.name.trim()}&quot; must match Delhivery records</span>}
           </div>
         </div>
         <p className="text-xs text-gray-500 mt-3">Pincode is used to fetch real-time shipping rates via Delhivery API. Lat/Lng used as fallback for distance calculation.</p>

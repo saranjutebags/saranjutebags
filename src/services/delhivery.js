@@ -75,10 +75,15 @@ export const calculateShippingCharge = async ({ originPin, destPin, weightGrams,
   const response = await fetch(url, { headers: authHeader() });
   if (!response.ok) throw new Error(`Delhivery charge error: ${response.status}`);
   const text = await response.text();
+  console.log('[Delhivery] Charge raw response:', text.slice(0, 1000));
   const parser = new DOMParser();
   const xml = parser.parseFromString(text, 'text/xml');
   const item = xml.querySelector('list-item');
-  if (!item) throw new Error('Delhivery charge: no list-item in XML response');
+  if (!item) {
+    const errMsg = xml.querySelector('error, Error, Message, message')?.textContent || 'no list-item in XML response';
+    console.error('[Delhivery] Charge XML error:', text.slice(0, 2000));
+    throw new Error(`Delhivery charge: ${errMsg}`);
+  }
   const totalEl = item.querySelector('total_amount');
   const grossEl = item.querySelector('gross_amount');
   return {
@@ -102,6 +107,39 @@ export const checkPincodeServiceability = async (pincode) => {
   const response = await fetch(apiUrl(`/c/api/pin-codes/json/?filter_codes=${pincode}`), { headers: authHeader() });
   if (!response.ok) throw new Error(`Delhivery pincode error: ${response.status}`);
   return response.json();
+};
+
+// ─── Warehouse Registration ───────────────────────────────
+export const registerWarehouse = async (warehouseData) => {
+  if (!API_KEY) return null;
+  const response = await fetch(apiUrl('/api/backend/clientwarehouse/create/'), {
+    method: 'POST',
+    headers: {
+      ...authHeader(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(warehouseData),
+  });
+  const text = await response.text();
+  console.log('[Delhivery] Warehouse registration raw response:', text.slice(0, 500));
+  let result, xmlError;
+  try {
+    result = JSON.parse(text);
+  } catch {
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(text, 'text/xml');
+    const msgEl = xml.querySelector('root > data > message, data > message, message');
+    xmlError = msgEl?.textContent || xml.querySelector('error')?.textContent || null;
+    const successEl = xml.querySelector('success');
+    if (successEl && successEl.textContent === 'false') {
+      throw new Error(xmlError || 'Warehouse registration failed');
+    }
+    if (!response.ok) throw new Error(xmlError || `Delhivery warehouse registration error: ${response.status}`);
+    result = { success: successEl?.textContent === 'true', _xml: true };
+  }
+  if (!response.ok) throw new Error(result?.error || xmlError || `Delhivery warehouse registration error: ${response.status}`);
+  if (result?.success === false) throw new Error(result?.errors?.[0] || xmlError || 'Warehouse registration failed');
+  return result;
 };
 
 // ─── Cancel Shipment ───────────────────────────────────────
