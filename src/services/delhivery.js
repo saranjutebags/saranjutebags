@@ -14,7 +14,9 @@ export const fetchWaybill = async (count = 1, clientName = '') => {
   if (clientName) params.set('cl', clientName);
   const response = await fetch(apiUrl(`/waybill/api/fetch/json/?${params}`), { headers: authHeader() });
   if (!response.ok) throw new Error(`Delhivery waybill error: ${response.status}`);
-  return response.json();
+  const data = await response.json();
+  if (typeof data === 'string' || typeof data === 'number') return { waybills: [String(data)] };
+  return data;
 };
 
 // ─── Order / Shipment Creation ─────────────────────────────

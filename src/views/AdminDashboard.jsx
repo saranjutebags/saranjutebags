@@ -475,7 +475,7 @@ const AdminDashboard = () => {
       showMessage('Fetching waybill from Delhivery…');
 
       const waybillData = await fetchWaybill(1, companySettings?.companyName);
-      const waybills = waybillData?.waybills || waybillData?.data?.waybills || (waybillData?.waybill ? [waybillData.waybill] : []);
+      const waybills = waybillData?.waybills || [];
       if (!waybills.length) {
         console.warn('Delhivery waybill response:', waybillData);
         throw new Error('No waybill returned from Delhivery. Check API key and account configuration.');
@@ -533,7 +533,7 @@ const AdminDashboard = () => {
         isCOD: paymentMode === 'COD',
       });
 
-      const actualCharge = chargeResult?.total_amount || chargeResult?.data?.total_amount || 0;
+      const actualCharge = chargeResult?.total_amount || 0;
 
       const updatedShipping = actualCharge > 0 ? Math.round(actualCharge * 100) / 100 : order.shippingCharge || 0;
       const updatedGrandTotal = Math.round(((order.grandTotal || order.total || 0) - (order.shippingCharge || 0) + updatedShipping) * 100) / 100;
