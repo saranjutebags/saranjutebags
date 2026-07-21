@@ -1,9 +1,4 @@
 {
-  "functions": {
-    "api/delhivery.js": {
-      "runtime": "@vercel/node@3"
-    }
-  },
   "rewrites": [
     { "source": "/api/delhivery/:path*", "destination": "/api/delhivery" },
     { "source": "/(.*)", "destination": "/index.html" }
