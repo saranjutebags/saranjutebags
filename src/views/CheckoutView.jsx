@@ -233,34 +233,71 @@ const CheckoutView = () => {
 
   const handleRazorpayPayment = async (order) => {
     await loadRazorpayScript();
+    if (!window.Razorpay) {
+      return { paid: false, error: 'Razorpay SDK not loaded' };
+    }
+
+    const amountPaise = Math.round(advance * 100);
+    const createRes = await fetch('/api/create-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        amount: amountPaise,
+        currency: 'INR',
+        receipt: order.id,
+      }),
+    });
+
+    if (!createRes.ok) {
+      const errData = await createRes.json().catch(() => ({}));
+      throw new Error(errData.message || 'Failed to initiate payment order');
+    }
+
+    const { order_id, amount: orderAmount } = await createRes.json();
+
     return new Promise((resolve) => {
-      if (!window.Razorpay) {
-        resolve({ paid: false, error: 'Razorpay SDK not loaded' });
-        return;
-      }
       let settled = false;
       const safeResolve = (value) => { if (!settled) { settled = true; resolve(value); } };
       const digits = (order.shippingAddress?.phone || '').replace(/\D/g, '');
       const phone = digits.length > 10 ? digits.slice(-10) : digits;
       const options = {
-        key: 'rzp_test_TFjh4re4GuxRmE',
-        amount: Math.round(advance * 100),
+        key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+        amount: orderAmount,
         currency: 'INR',
         name: 'Saran Jute Bags',
         description: `Order ${order.id}`,
-        handler: (response) => {
-          order.paidAmount = advance;
-          order.paymentStatus = 'Paid';
-          order.paymentDetails = {
-            razorpayPaymentId: response.razorpay_payment_id,
-            razorpayOrderId: response.razorpay_order_id,
-            razorpaySignature: response.razorpay_signature,
-            status: 'Paid',
-            gateway: 'Razorpay',
-            paidAmount: advance,
-            pendingAmount: isCustom ? Math.max(total - advance, 0) : 0,
-          };
-          safeResolve({ paid: true });
+        order_id: order_id,
+        handler: async (response) => {
+          try {
+            const verifyRes = await fetch('/api/verify-payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              }),
+            });
+            const verifyResult = await verifyRes.json();
+            if (verifyResult.success) {
+              order.paidAmount = advance;
+              order.paymentStatus = 'Paid';
+              order.paymentDetails = {
+                razorpayPaymentId: response.razorpay_payment_id,
+                razorpayOrderId: response.razorpay_order_id,
+                razorpaySignature: response.razorpay_signature,
+                status: 'Paid',
+                gateway: 'Razorpay',
+                paidAmount: advance,
+                pendingAmount: isCustom ? Math.max(total - advance, 0) : 0,
+              };
+              safeResolve({ paid: true });
+            } else {
+              safeResolve({ paid: false, error: 'Payment verification failed: signature mismatch' });
+            }
+          } catch {
+            safeResolve({ paid: false, error: 'Payment verification failed' });
+          }
         },
         prefill: {
           name: order.shippingAddress?.name || '',
@@ -269,12 +306,13 @@ const CheckoutView = () => {
         },
         theme: { color: '#059669' },
         modal: {
-          ondismiss: () => safeResolve({ paid: false }),
+          ondismiss: () => safeResolve({ paid: false, cancelled: true }),
         },
       };
       const rzp = new window.Razorpay(options);
       rzp.on('payment.failed', (response) => {
-        console.warn('Razorpay payment attempt failed:', response.error?.description);
+        console.warn('Razorpay payment failed:', response.error?.description || 'Unknown error');
+        safeResolve({ paid: false, error: response.error?.description || 'Payment failed' });
       });
       rzp.open();
     });
@@ -422,8 +460,8 @@ const CheckoutView = () => {
 
         if (!rzpResult.paid) {
           setPopup({
-            title: 'Payment Cancelled',
-            message: 'Your payment was cancelled. No order has been created.',
+            title: rzpResult.cancelled ? 'Payment Cancelled' : 'Payment Failed',
+            message: rzpResult.error || 'Your payment could not be completed. No order has been created.',
             primaryLabel: 'OK',
             onPrimary: () => setPopup(null),
           });

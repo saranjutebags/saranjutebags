@@ -1,7 +1,6 @@
-export default async (req, res) => {
+module.exports = async (req, res) => {
   console.log('[DelhiveryProxy] req.url:', req.url);
   console.log('[DelhiveryProxy] req.method:', req.method);
-  console.log('[DelhiveryProxy] req.headers:', JSON.stringify(req.headers));
 
   const url = new URL(req.url, 'http://localhost');
   const pathname = url.pathname;
@@ -39,7 +38,7 @@ export default async (req, res) => {
     res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
     res.status(response.status).send(responseBody);
   } catch (error) {
-    console.error('[DelhiveryProxy] Fetch error:', error.message);
+    console.error('[DelhiveryProxy] Fetch error:', error.message, error.stack);
     res.status(500).json({ error: 'Delhivery proxy error', message: error.message, url: targetUrl });
   }
 };
