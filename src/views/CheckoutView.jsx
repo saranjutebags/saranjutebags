@@ -120,7 +120,7 @@ const CheckoutView = () => {
     [cartTotal, couponDiscountInfo],
   );
 
-  // Fetch real-time shipping charge from Delhivery when pincode or cart changes
+  // Fetch real-time shipping charge from Delhivery when pincode or cart changes (Domestic India only)
   useEffect(() => {
     console.log('[Delhivery] Checkout useEffect triggered');
     if (!isDelhiveryActive()) {
@@ -133,12 +133,25 @@ const CheckoutView = () => {
       setDelhiveryCharge(null);
       return;
     }
-    const destPin = selectedAddress?.pincode?.trim();
-    if (!destPin) {
-      console.log('[Delhivery] No destination pincode from selected address, using fallback shipping');
+
+    // Check if destination address is international
+    const prefix = countries.find(c => selectedAddress?.phone?.startsWith(c.code));
+    const countryCode = prefix ? (phoneToCountryCode[prefix.code] || 'IN') : 'IN';
+    const isIntlAddress = isInternational(countryCode);
+
+    if (isIntlAddress) {
+      console.log('[Delhivery] International address selected - skipping domestic Delhivery API, using international rate table');
       setDelhiveryCharge(null);
       return;
     }
+
+    const destPin = selectedAddress?.pincode?.trim();
+    if (!destPin || !/^\d{6}$/.test(destPin)) {
+      console.log('[Delhivery] Destination pincode is not a valid 6-digit Indian PIN code, using fallback shipping');
+      setDelhiveryCharge(null);
+      return;
+    }
+
     const weightGrams = Math.round(calcTotalWeight(cart) * 1000);
     console.log(`[Delhivery] Cart calculated weight=${weightGrams}g`);
 
@@ -169,7 +182,7 @@ const CheckoutView = () => {
       });
 
     return () => { cancelled = true; };
-  }, [selectedAddress?.pincode, cart, warehouse?.pincode]);
+  }, [selectedAddress, cart, warehouse?.pincode]);
 
   const shippingDetails = useMemo(() => {
     let countryCode = 'IN';

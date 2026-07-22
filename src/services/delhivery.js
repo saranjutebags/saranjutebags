@@ -66,6 +66,12 @@ export const requestPickup = async (pickupPayload) => {
 // The endpoint returns a JSON array: [{ total_amount, gross_amount, ... }]
 export const calculateShippingCharge = async ({ originPin, destPin, weightGrams, isCOD = false }) => {
   if (!API_KEY) return null;
+  const cleanOrigin = String(originPin || '').trim();
+  const cleanDest = String(destPin || '').trim();
+  if (!/^\d{6}$/.test(cleanOrigin) || !/^\d{6}$/.test(cleanDest)) {
+    console.warn('[Delhivery] Skipping domestic charge calculation for non-Indian 6-digit pincode:', { originPin, destPin });
+    return null;
+  }
   const params = new URLSearchParams({
     md: 'E',
     cgm: String(Math.round(weightGrams)),
