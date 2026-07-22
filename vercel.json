@@ -1,16 +1,8 @@
 {
   "rewrites": [
     {
-      "source": "/api/delhivery/:path*",
-      "destination": "/api/delhivery.js"
-    },
-    {
-      "source": "/api/create-order",
-      "destination": "/api/create-order.js"
-    },
-    {
-      "source": "/api/verify-payment",
-      "destination": "/api/verify-payment.js"
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
     },
     {
       "source": "/(.*)",
