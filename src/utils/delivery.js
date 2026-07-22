@@ -2,6 +2,7 @@ const WAREHOUSE_DEFAULTS = {
   lat: 17.433333,
   lng: 78.383333,
   address: 'Mehdipatnam, Hyderabad, Telangana 500028',
+  pincode: '500028', // Mehdipatnam, Hyderabad — set this in Admin Dashboard to your actual warehouse pin
   active: true,
 };
 

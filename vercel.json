@@ -3,6 +3,10 @@
     {
       "source": "/api/delhivery/:match*",
       "destination": "/api/delhivery"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }

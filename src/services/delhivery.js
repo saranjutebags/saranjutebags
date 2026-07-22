@@ -1,4 +1,6 @@
 const API_KEY = import.meta.env.VITE_DELHIVERY_API_KEY || '';
+// Route all requests through our serverless proxy to avoid CORS issues.
+// The proxy (api/delhivery.js) forwards requests to track.delhivery.com server-side.
 const apiUrl = (path) => `/api/delhivery${path}`;
 
 const authHeader = () => ({
@@ -60,38 +62,63 @@ export const requestPickup = async (pickupPayload) => {
   return response.json();
 };
 
-// ─── Shipping Charge Calculation (returns XML, parse total_amount) ──
+// ─── Shipping Charge Calculation ──────────────────────────────────────────────
+// The endpoint returns a JSON array: [{ total_amount, gross_amount, ... }]
 export const calculateShippingCharge = async ({ originPin, destPin, weightGrams, isCOD = false }) => {
   if (!API_KEY) return null;
   const params = new URLSearchParams({
     md: 'E',
-    cgm: String(Math.max(Math.round(weightGrams), 1000)),
+    cgm: String(Math.round(weightGrams)),
     o_pin: String(originPin),
     d_pin: String(destPin),
     ss: 'Delivered',
     pt: isCOD ? 'COD' : 'Pre-paid',
   });
-  const url = apiUrl(`/kinko/v1/invoice/charges/?${params}`);
+  // Note: /api/kinko/v1/invoice/charges/.json is the current endpoint path.
+  // The old /kinko/v1/invoice/charges/ path (without /api/ prefix and .json suffix) is deprecated.
+  const url = apiUrl(`/api/kinko/v1/invoice/charges/.json?${params}`);
   const response = await fetch(url, { headers: authHeader() });
-  if (!response.ok) throw new Error(`Delhivery charge error: ${response.status}`);
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    console.error(`[Delhivery] Charge HTTP ${response.status}:`, body.slice(0, 500));
+    throw new Error(`Delhivery charge error: ${response.status}`);
+  }
   const text = await response.text();
   console.log('[Delhivery] Charge raw response:', text.slice(0, 1000));
-  const parser = new DOMParser();
-  const xml = parser.parseFromString(text, 'text/xml');
-  const item = xml.querySelector('list-item');
-  if (!item) {
-    const errMsg = xml.querySelector('error, Error, Message, message')?.textContent || 'no list-item in XML response';
-    console.error('[Delhivery] Charge XML error:', text.slice(0, 2000));
-    throw new Error(`Delhivery charge: ${errMsg}`);
+
+  // Try JSON first (current API format: an array of charge objects)
+  try {
+    const json = JSON.parse(text);
+    const item = Array.isArray(json) ? json[0] : json;
+    if (!item || item.total_amount == null) {
+      throw new Error('Delhivery charge: no charge data in JSON response');
+    }
+    return {
+      total_amount: parseFloat(item.total_amount) || 0,
+      gross_amount: parseFloat(item.gross_amount) || 0,
+      _raw: item,
+    };
+  } catch (jsonErr) {
+    // Fall back to XML parsing for legacy responses
+    console.warn('[Delhivery] JSON parse failed, trying XML:', jsonErr.message);
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(text, 'text/xml');
+    const xmlItem = xml.querySelector('list-item');
+    if (!xmlItem) {
+      const errMsg = xml.querySelector('error, Error, Message, message')?.textContent || 'no charge data in response';
+      console.error('[Delhivery] Charge parse error:', text.slice(0, 2000));
+      throw new Error(`Delhivery charge: ${errMsg}`);
+    }
+    const totalEl = xmlItem.querySelector('total_amount');
+    const grossEl = xmlItem.querySelector('gross_amount');
+    return {
+      total_amount: totalEl ? parseFloat(totalEl.textContent) : 0,
+      gross_amount: grossEl ? parseFloat(grossEl.textContent) : 0,
+      _rawXml: text,
+    };
   }
-  const totalEl = item.querySelector('total_amount');
-  const grossEl = item.querySelector('gross_amount');
-  return {
-    total_amount: totalEl ? parseFloat(totalEl.textContent) : 0,
-    gross_amount: grossEl ? parseFloat(grossEl.textContent) : 0,
-    _rawXml: text,
-  };
 };
+
 
 // ─── Tracking ──────────────────────────────────────────────
 export const trackOrder = async (waybill) => {

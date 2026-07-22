@@ -219,7 +219,7 @@ export const CartProvider = ({ children }) => {
       if (snap.exists()) {
         setWarehouse(snap.data());
       } else {
-        setDoc(doc(db, 'settings', 'warehouse'), {
+        const defaultWarehouse = {
           lat: 17.433333,
           lng: 78.383333,
           placeId: '',
@@ -228,7 +228,11 @@ export const CartProvider = ({ children }) => {
           address: 'Mehdipatnam, Hyderabad, Telangana 500028',
           pincode: '500028',
           active: true,
-        }).catch(() => undefined);
+        };
+        // Immediately set state with defaults so checkout can proceed;
+        // the setDoc write will trigger a re-snapshot that sets it again.
+        setWarehouse(defaultWarehouse);
+        setDoc(doc(db, 'settings', 'warehouse'), defaultWarehouse).catch(() => undefined);
       }
     }, () => setWarehouse(null));
 

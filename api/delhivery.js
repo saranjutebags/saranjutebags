@@ -12,8 +12,20 @@ module.exports = async (req, res) => {
   const targetUrl = `https://track.delhivery.com/${subPath}${url.search}`;
   console.log('[DelhiveryProxy] targetUrl:', targetUrl);
 
+  // Prefer the server-side env var (set in Vercel dashboard as DELHIVERY_API_KEY).
+  // This keeps the key out of the browser JS bundle and works regardless of whether
+  // VITE_DELHIVERY_API_KEY is available at build time.
+  const serverKey =
+    process.env.DELHIVERY_API_KEY ||
+    process.env.VITE_DELHIVERY_API_KEY ||
+    '';
+
   const headers = {};
-  if (req.headers.authorization) {
+  if (serverKey) {
+    // Server-side key takes priority — always correct in production
+    headers['Authorization'] = `Token ${serverKey}`;
+  } else if (req.headers.authorization) {
+    // Fallback: forward whatever the client sent (useful in local dev via Vite proxy)
     headers['Authorization'] = req.headers.authorization;
   }
 
@@ -27,8 +39,9 @@ module.exports = async (req, res) => {
     const rawBody = Buffer.concat(chunks).toString('utf-8');
     if (rawBody) {
       fetchOptions.body = rawBody;
-      headers['Content-Type'] = req.headers['content-type']
-        || (rawBody.startsWith('{') ? 'application/json' : 'application/x-www-form-urlencoded');
+      headers['Content-Type'] =
+        req.headers['content-type'] ||
+        (rawBody.startsWith('{') ? 'application/json' : 'application/x-www-form-urlencoded');
     }
   }
 

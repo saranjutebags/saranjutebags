@@ -139,9 +139,8 @@ const CheckoutView = () => {
       setDelhiveryCharge(null);
       return;
     }
-    const rawWeightGrams = Math.round(calcTotalWeight(cart) * 1000);
-    const weightGrams = Math.max(rawWeightGrams, 1000); // default minimum 1kg
-    console.log(`[Delhivery] Cart raw weight=${rawWeightGrams}g, using ${weightGrams}g for API`);
+    const weightGrams = Math.round(calcTotalWeight(cart) * 1000);
+    console.log(`[Delhivery] Cart calculated weight=${weightGrams}g`);
 
     let cancelled = false;
     setDelhiveryLoading(true);
