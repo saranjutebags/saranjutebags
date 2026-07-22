@@ -77,6 +77,15 @@ const detectCountryCode = (phone = '') => {
 
 /* ──────────────────────────────────────────────── */
 
+const getCountryCodeFromAddress = (address) => {
+  if (!address) return 'IN';
+  if (address.countryCode && phoneToCountryCode[address.countryCode]) {
+    return phoneToCountryCode[address.countryCode];
+  }
+  const prefix = countries.find(c => address.phone?.startsWith(c.code));
+  return prefix ? (phoneToCountryCode[prefix.code] || 'IN') : 'IN';
+};
+
 const CheckoutView = () => {
   const { cart, cartTotal, addresses, getDefaultAddress, addAddress, updateAddress, addOrder, setLatestOrderItem, clearCart, setDefaultAddress, calculateOrderPricing, pricingSettings, coupons, warehouse, domesticShipping, internationalRates, updateOrder } = useCart();
   const { user, userData } = useAuth();
@@ -135,12 +144,11 @@ const CheckoutView = () => {
     }
 
     // Check if destination address is international
-    const prefix = countries.find(c => selectedAddress?.phone?.startsWith(c.code));
-    const countryCode = prefix ? (phoneToCountryCode[prefix.code] || 'IN') : 'IN';
+    const countryCode = getCountryCodeFromAddress(selectedAddress);
     const isIntlAddress = isInternational(countryCode);
 
     if (isIntlAddress) {
-      console.log('[Delhivery] International address selected - skipping domestic Delhivery API, using international rate table');
+      console.log(`[Delhivery] International destination (${countryCode}) — skipping domestic Delhivery API, using international rate table`);
       setDelhiveryCharge(null);
       return;
     }
@@ -192,8 +200,7 @@ const CheckoutView = () => {
     let totalWeight = 0;
 
     if (selectedAddress) {
-      const prefix = countries.find(c => selectedAddress.phone?.startsWith(c.code));
-      countryCode = prefix ? (phoneToCountryCode[prefix.code] || 'IN') : 'IN';
+      countryCode = getCountryCodeFromAddress(selectedAddress);
       const isIntl = isInternational(countryCode);
 
       totalWeight = calcTotalWeight(cart);
