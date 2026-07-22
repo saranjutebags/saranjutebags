@@ -3,6 +3,7 @@
     { "source": "/api/delhivery/:path*", "destination": "/api/delhivery" },
     { "source": "/api/create-order", "destination": "/api/create-order" },
     { "source": "/api/verify-payment", "destination": "/api/verify-payment" },
+    { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
