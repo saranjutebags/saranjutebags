@@ -12,7 +12,7 @@ export const fetchWaybill = async (count = 1, clientName = '') => {
   if (!API_KEY) return null;
   const params = new URLSearchParams({ count: String(count) });
   if (clientName) params.set('cl', clientName);
-  const response = await fetch(apiUrl(`/waybill/api/fetch/json/?${params}`), { headers: authHeader() });
+  const response = await fetch(apiUrl(`/waybill/fetch/json/?${params}`), { headers: authHeader() });
   if (!response.ok) throw new Error(`Delhivery waybill error: ${response.status}`);
   const data = await response.json();
   if (typeof data === 'string' || typeof data === 'number') return { waybills: [String(data)] };
@@ -24,7 +24,7 @@ export const createShipment = async (shipmentPayload) => {
   if (!API_KEY) return null;
   const formBody = `format=json&data=${encodeURIComponent(JSON.stringify(shipmentPayload))}`;
   console.log('[Delhivery] Sending shipment payload:', JSON.stringify(shipmentPayload));
-  const response = await fetch(apiUrl('/api/cmu/create.json'), {
+  const response = await fetch(apiUrl('/cmu/create.json'), {
     method: 'POST',
     headers: {
       Authorization: `Token ${API_KEY}`,
@@ -71,7 +71,7 @@ export const calculateShippingCharge = async ({ originPin, destPin, weightGrams,
     ss: 'Delivered',
     pt: isCOD ? 'COD' : 'Pre-paid',
   });
-  const url = apiUrl(`/api/kinko/v1/invoice/charges/?${params}`);
+  const url = apiUrl(`/kinko/v1/invoice/charges/?${params}`);
   const response = await fetch(url, { headers: authHeader() });
   if (!response.ok) throw new Error(`Delhivery charge error: ${response.status}`);
   const text = await response.text();
@@ -96,7 +96,7 @@ export const calculateShippingCharge = async ({ originPin, destPin, weightGrams,
 // ─── Tracking ──────────────────────────────────────────────
 export const trackOrder = async (waybill) => {
   if (!API_KEY) return null;
-  const response = await fetch(apiUrl(`/api/v1/packages/json/?waybill=${encodeURIComponent(waybill)}`), { headers: authHeader() });
+  const response = await fetch(apiUrl(`/v1/packages/json/?waybill=${encodeURIComponent(waybill)}`), { headers: authHeader() });
   if (!response.ok) throw new Error(`Delhivery tracking error: ${response.status}`);
   return response.json();
 };
@@ -104,7 +104,7 @@ export const trackOrder = async (waybill) => {
 // ─── Pincode Serviceability ────────────────────────────────
 export const checkPincodeServiceability = async (pincode) => {
   if (!API_KEY) return null;
-  const response = await fetch(apiUrl(`/c/api/pin-codes/json/?filter_codes=${pincode}`), { headers: authHeader() });
+  const response = await fetch(apiUrl(`/c/pin-codes/json/?filter_codes=${pincode}`), { headers: authHeader() });
   if (!response.ok) throw new Error(`Delhivery pincode error: ${response.status}`);
   return response.json();
 };
@@ -112,7 +112,7 @@ export const checkPincodeServiceability = async (pincode) => {
 // ─── Warehouse Registration ───────────────────────────────
 export const registerWarehouse = async (warehouseData) => {
   if (!API_KEY) return null;
-  const response = await fetch(apiUrl('/api/backend/clientwarehouse/create/'), {
+  const response = await fetch(apiUrl('/backend/clientwarehouse/create/'), {
     method: 'POST',
     headers: {
       ...authHeader(),
@@ -145,7 +145,7 @@ export const registerWarehouse = async (warehouseData) => {
 // ─── Cancel Shipment ───────────────────────────────────────
 export const cancelShipment = async (waybill) => {
   if (!API_KEY) return null;
-  const response = await fetch(apiUrl('/api/p/edit'), {
+  const response = await fetch(apiUrl('/p/edit'), {
     method: 'POST',
     headers: {
       ...authHeader(),
