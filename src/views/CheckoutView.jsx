@@ -124,18 +124,18 @@ const CheckoutView = () => {
   useEffect(() => {
     console.log('[Delhivery] Checkout useEffect triggered');
     if (!isDelhiveryActive()) {
-      console.log('[Delhivery] Not active - no API key');
+      console.log('[Delhivery] Not active - no API key configured, using fallback shipping');
       setDelhiveryCharge(null);
       return;
     }
     if (!warehouse?.pincode) {
-      console.log('[Delhivery] Warehouse has no pincode');
+      console.log('[Delhivery] Warehouse has no pincode, using fallback shipping');
       setDelhiveryCharge(null);
       return;
     }
     const destPin = selectedAddress?.pincode?.trim();
     if (!destPin) {
-      console.log('[Delhivery] No destination pincode from selected address');
+      console.log('[Delhivery] No destination pincode from selected address, using fallback shipping');
       setDelhiveryCharge(null);
       return;
     }
@@ -156,7 +156,7 @@ const CheckoutView = () => {
           console.log(`[Delhivery] Got shipping charge: ₹${charge}`);
           setDelhiveryCharge(Number(charge));
         } else {
-          console.log('[Delhivery] No valid charge in response, using fallback');
+          console.log('[Delhivery] No valid charge in response, using fallback shipping');
           setDelhiveryCharge(null);
         }
         setDelhiveryLoading(false);
@@ -164,6 +164,7 @@ const CheckoutView = () => {
       .catch((err) => {
         if (cancelled) return;
         console.error('[Delhivery] API call failed:', err);
+        console.log('[Delhivery] Using fallback shipping due to API failure');
         setDelhiveryCharge(null);
         setDelhiveryLoading(false);
       });

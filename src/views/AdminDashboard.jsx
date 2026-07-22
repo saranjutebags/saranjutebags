@@ -177,6 +177,8 @@ const AdminDashboard = () => {
   const [shipTargetOrder, setShipTargetOrder] = useState(null);
   const [shipPackageType, setShipPackageType] = useState('Plastic Cover/Flyer');
   const [shipWeight, setShipWeight] = useState('');
+  const [waybillInput, setWaybillInput] = useState('');
+  const [showWaybillInput, setShowWaybillInput] = useState(false);
 
   // Theme
   const [themeColors, setThemeColors] = useState({
@@ -497,123 +499,50 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleShipWithDelhivery = async (order, packageType = 'Plastic Cover/Flyer', weightGrams = 1000) => {
-    if (!isDelhiveryActive()) {
-      showMessage('Delhivery API key not configured', 'error');
-      return;
-    }
-    if (!warehouse?.pincode || !warehouse?.name?.trim() || !warehouse?.phone) {
-      showMessage('Please set warehouse name, phone, and pincode in settings first', 'error');
-      return;
-    }
+  const handleShipWithDelhivery = async (order) => {
     if (!order?.shippingAddress?.pincode) {
       showMessage('Order has no delivery pincode', 'error');
+      return;
+    }
+    
+    // Open Delhivery shipping page in new tab
+    const delhiveryUrl = 'https://one.delhivery.com/orders/forward/create';
+    window.open(delhiveryUrl, '_blank');
+    
+    // Show waybill input for manual entry
+    setShowWaybillInput(true);
+    setShipTargetOrder(order);
+    showMessage('Delhivery page opened. Enter waybill number after shipping.');
+  };
+
+  const handleMarkAsShipped = async (order, waybill) => {
+    if (!waybill?.trim()) {
+      showMessage('Please enter waybill number', 'error');
       return;
     }
 
     setDelhiveryShipping(true);
     try {
-      showMessage('Fetching waybill from Delhivery…');
-
-      const waybillData = await fetchWaybill(1, companySettings?.companyName);
-      const waybills = waybillData?.waybills || [];
-      if (!waybills.length) {
-        console.warn('Delhivery waybill response:', waybillData);
-        throw new Error('No waybill returned from Delhivery. Check API key and account configuration.');
-      }
-      const waybill = waybills[0];
-
-      showMessage(`Waybill ${waybill} obtained. Creating shipment…`);
-
-      const paymentMode = order.paymentMethod === 'COD' ? 'COD' : 'Prepaid';
-      const items = order.items || [];
-      const productsDesc = items.map(item => `${item.name || ''} x${item.quantity || 1}`).join(', ') || 'Jute Bags';
-      const totalQty = items.reduce((sum, item) => sum + (item.quantity || 1), 0) || 1;
-
-      const shipmentPayload = {
-        shipments: [
-          {
-            waybill,
-            order: order.id,
-            name: order.shippingAddress.name || '',
-            phone: (order.shippingAddress.phone || '').replace(/\D/g, '').slice(-10),
-            add: `${order.shippingAddress.addressLine1 || ''}${order.shippingAddress.addressLine2 ? ', ' + order.shippingAddress.addressLine2 : ''}`,
-            pin: order.shippingAddress.pincode,
-            city: order.shippingAddress.city || '',
-            state: order.shippingAddress.state || '',
-            country: 'India',
-            payment_mode: paymentMode,
-            cod_amount: paymentMode === 'COD' ? Math.round(order.grandTotal || order.total || 0) : 0,
-            total_amount: Math.round(order.grandTotal || order.total || 0),
-            weight: String(weightGrams),
-            products_desc: productsDesc,
-            quantity: String(totalQty),
-            seller_name: companySettings?.companyName || 'Saran Jute Bags',
-            seller_add: warehouse.address || '',
-            shipping_mode: 'Surface',
-            plastic_packaging: packageType === 'Plastic Cover/Flyer' ? true : false,
-          },
-        ],
-        pickup_location: {
-          name: (warehouse.name || '').trim() || 'Main Warehouse',
-        },
-      };
-
-      await createShipment(shipmentPayload);
-
-      showMessage('Getting actual shipping charge…');
-
-      const chargeResult = await calculateShippingCharge({
-        originPin: warehouse.pincode,
-        destPin: order.shippingAddress.pincode,
-        weightGrams,
-        isCOD: paymentMode === 'COD',
-      });
-
-      const actualCharge = chargeResult?.total_amount || 0;
-
-      const updatedShipping = actualCharge > 0 ? Math.round(actualCharge * 100) / 100 : order.shippingCharge || 0;
-      const updatedGrandTotal = Math.round(((order.grandTotal || order.total || 0) - (order.shippingCharge || 0) + updatedShipping) * 100) / 100;
-
       await updateOrder(order.id, {
-        trackingNumber: waybill,
-        shippingCharge: updatedShipping,
-        grandTotal: updatedGrandTotal,
-        total: updatedGrandTotal,
+        trackingNumber: waybill.trim(),
         status: 'Shipped',
-        delhiveryShipment: { waybill, shippedAt: new Date().toISOString(), charge: updatedShipping, packageType, weightGrams },
+        delhiveryShipment: { waybill: waybill.trim(), shippedAt: new Date().toISOString(), manualEntry: true },
       }, order);
-
-      showMessage('Requesting pickup…');
-
-      const pickupPayload = {
-        pickup_time: new Date().toISOString().slice(0, 16),
-        pickup_date: new Date().toISOString().slice(0, 10),
-        name: warehouse.name || 'Main Warehouse',
-        address: warehouse.address || '',
-        city: (warehouse.address || '').split(',')[1]?.trim() || 'Hyderabad',
-        state: (warehouse.address || '').split(',')[2]?.split(' ')[0]?.trim() || 'Telangana',
-        pincode: warehouse.pincode,
-        phone: (warehouse.phone || '').replace(/\D/g, '').slice(-10),
-        waybill,
-      };
-
-      await requestPickup(pickupPayload).catch(() => {});
 
       setSelectedOrder((prev) => prev ? {
         ...prev,
-        trackingNumber: waybill,
+        trackingNumber: waybill.trim(),
         status: 'Shipped',
-        shippingCharge: updatedShipping,
-        grandTotal: updatedGrandTotal,
-        total: updatedGrandTotal,
       } : null);
 
-      addActivityLog(`Shipped order ${order.id} via Delhivery (waybill ${waybill})`, user?.email);
-      showMessage(`✓ Shipped via Delhivery! Waybill: ${waybill}. Actual charge: ₹${updatedShipping}`);
+      addActivityLog(`Marked order ${order.id} as shipped (waybill ${waybill})`, user?.email);
+      showMessage(`✓ Order marked as shipped! Waybill: ${waybill}`);
+      setShowWaybillInput(false);
+      setWaybillInput('');
+      setShipTargetOrder(null);
     } catch (err) {
-      console.error('Delhivery shipping error:', err);
-      showMessage(`Ship failed: ${err.message}`, 'error');
+      console.error('Mark shipped error:', err);
+      showMessage(`Failed to mark as shipped: ${err.message}`, 'error');
     } finally {
       setDelhiveryShipping(false);
     }
@@ -3628,63 +3557,102 @@ const AdminDashboard = () => {
                   <X className="w-5 h-5 text-gray-500" />
                 </button>
               </div>
-              {(() => {
-                const items = shipTargetOrder.items || [];
-                const defaultWeight = Math.round(
-                  Math.max(items.reduce((sum, item) => sum + (item.weightPerPiece || 1) * (item.quantity || 1), 0) * 1000, 1000)
-                );
-                return (
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Package Type</label>
-                      <select
-                        value={shipPackageType}
-                        onChange={(e) => setShipPackageType(e.target.value)}
-                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      >
-                        <option value="Plastic Cover/Flyer">Plastic Cover/Flyer</option>
-                        <option value="Cardboard Box">Cardboard Box</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Weight (grams)</label>
-                      <input
-                        type="number"
-                        value={shipWeight || defaultWeight}
-                        onChange={(e) => setShipWeight(e.target.value)}
-                        min={1}
-                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      />
-                      <p className="text-xs text-gray-400 mt-1">Calculated from order items: {defaultWeight}g. Adjust if needed.</p>
-                    </div>
-                    <div className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3 space-y-1">
-                      <p><strong>Order:</strong> {shipTargetOrder.id}</p>
-                      <p><strong>Customer:</strong> {shipTargetOrder.shippingAddress?.name}</p>
-                      <p><strong>From:</strong> {warehouse?.name} ({warehouse?.pincode})</p>
-                      <p><strong>To:</strong> {shipTargetOrder.shippingAddress?.city}, {shipTargetOrder.shippingAddress?.pincode}</p>
-                    </div>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={() => setShowShipForm(false)}
-                        className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-all"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={async () => {
-                          setShowShipForm(false);
-                          await handleShipWithDelhivery(shipTargetOrder, shipPackageType, Number(shipWeight || defaultWeight));
-                        }}
-                        disabled={delhiveryShipping}
-                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
-                      >
-                        <Truck className="w-4 h-4" />
-                        Confirm & Ship
-                      </button>
-                    </div>
-                  </div>
-                );
-              })()}
+              <div className="space-y-4">
+                <div className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3 space-y-1">
+                  <p><strong>Order:</strong> {shipTargetOrder.id}</p>
+                  <p><strong>Customer:</strong> {shipTargetOrder.shippingAddress?.name}</p>
+                  <p><strong>To:</strong> {shipTargetOrder.shippingAddress?.city}, {shipTargetOrder.shippingAddress?.pincode}</p>
+                </div>
+                <p className="text-sm text-gray-600">Clicking below will open the Delhivery shipping page in a new tab. After completing the shipment on Delhivery, you'll be able to enter the waybill number.</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowShipForm(false)}
+                    className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setShowShipForm(false);
+                      await handleShipWithDelhivery(shipTargetOrder);
+                    }}
+                    disabled={delhiveryShipping}
+                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Truck className="w-4 h-4" />
+                    Open Delhivery
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Waybill Input Modal */}
+      <AnimatePresence>
+        {showWaybillInput && shipTargetOrder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setShowWaybillInput(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                  <Truck className="w-5 h-5 text-emerald-600" />
+                  Enter Waybill Number
+                </h2>
+                <button onClick={() => setShowWaybillInput(false)} className="p-2 hover:bg-gray-100 rounded-full">
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+              <div className="space-y-4">
+                <div className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3 space-y-1">
+                  <p><strong>Order:</strong> {shipTargetOrder.id}</p>
+                  <p><strong>Customer:</strong> {shipTargetOrder.shippingAddress?.name}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Waybill Number</label>
+                  <input
+                    type="text"
+                    value={waybillInput}
+                    onChange={(e) => setWaybillInput(e.target.value)}
+                    placeholder="Enter waybill number from Delhivery"
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowWaybillInput(false);
+                      setWaybillInput('');
+                      setShipTargetOrder(null);
+                    }}
+                    className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await handleMarkAsShipped(shipTargetOrder, waybillInput);
+                    }}
+                    disabled={delhiveryShipping}
+                    className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                    Mark as Shipped
+                  </button>
+                </div>
+              </div>
             </motion.div>
           </div>
         )}

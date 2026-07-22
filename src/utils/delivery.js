@@ -65,7 +65,8 @@ export const calcInternationalShipping = (totalWeightKg, ratePerKg, minCharge) =
 };
 
 export const calcTotalWeight = (cartItems) => {
-  return cartItems.reduce((sum, item) => sum + (item.weightPerPiece || 0) * item.quantity, 0);
+  const DEFAULT_WEIGHT_PER_PIECE_KG = 0.3; // 300g default if no weight assigned
+  return cartItems.reduce((sum, item) => sum + ((item.weightPerPiece || DEFAULT_WEIGHT_PER_PIECE_KG) * item.quantity), 0);
 };
 
 export const getEstimatedDelivery = (distanceKm, countryCode) => {
