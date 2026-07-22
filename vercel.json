@@ -1,8 +1,8 @@
 {
   "rewrites": [
     {
-      "source": "/api/delhivery/:path*",
-      "destination": "/api/delhivery.js"
+      "source": "/api/delhivery/:match*",
+      "destination": "/api/delhivery"
     }
   ]
 }
