@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, CheckCircle2, CreditCard, Home, Plus, Tag, Truck, Wallet, X, Upload } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, CreditCard, Home, Plus, Tag, Truck, Wallet, X, Upload, MessageCircle, Globe } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -239,6 +239,64 @@ const CheckoutView = () => {
   const advance = paymentMethod === 'cod' ? (isCustom ? CUSTOM_ADVANCE : 0) : total;
   const balance = Math.max(total - advance, 0);
 
+  const handleInternationalWhatsAppOrder = () => {
+    const custName = selectedAddress?.name || userData?.displayName || 'Valued Customer';
+    const custPhone = selectedAddress?.phone || userData?.phone || 'Not provided';
+    const countryName = getCountryName(shippingDetails.countryCode);
+    const addrStr = selectedAddress
+      ? `${selectedAddress.addressLine1}${selectedAddress.addressLine2 ? ', ' + selectedAddress.addressLine2 : ''}, ${selectedAddress.city}, ${selectedAddress.state} - ${selectedAddress.pincode}`
+      : 'Not specified';
+
+    const cartItemsFormatted = cart.map((item, idx) => {
+      let line = `${idx + 1}. *${item.name}*\n   • Qty: ${item.quantity} | ₹${(item.price * item.quantity).toFixed(2)}`;
+      if (item.customText) line += `\n   • Custom Print: "${item.customText}"`;
+      return line;
+    }).join('\n');
+
+    let customDetailsStr = '';
+    if (customOrderEnabled && customOrder.quantity > 0) {
+      customDetailsStr = `\n\n*✨ Custom Bag Order Details:*\n` +
+        `• Bag Type: ${customOrder.bagType}\n` +
+        `• Name on Bag: ${customOrder.nameOnBag || 'N/A'}\n` +
+        `• Quantity: ${customOrder.quantity}\n` +
+        `• Instructions: ${customOrder.description || 'N/A'}`;
+    }
+
+    const messageText =
+      `🌐 *INTERNATIONAL ORDER INQUIRY - SARAN JUTE BAGS*\n` +
+      `───────────────────────────────\n` +
+      `👤 *CUSTOMER DETAILS:*\n` +
+      `• Name: ${custName}\n` +
+      `• Mobile: ${custPhone}\n` +
+      `• Country: ${countryName}\n` +
+      `• Delivery Address: ${addrStr}\n\n` +
+      `📦 *CART PRODUCTS (${cart.length}):*\n${cartItemsFormatted}` +
+      `${customDetailsStr}\n\n` +
+      `💰 *ORDER SUMMARY:*\n` +
+      `• Total Weight: ${shippingDetails.totalWeight.toFixed(2)} kg\n` +
+      `• Cart Subtotal: ₹${cartTotal.toFixed(2)}\n` +
+      `───────────────────────────────\n` +
+      `Hello! I want to place an international order to ${countryName}. Please assist with international shipping rates and payment options. Thank you!`;
+
+    const waUrl = `https://api.whatsapp.com/send?phone=919866027027&text=${encodeURIComponent(messageText)}`;
+    window.open(waUrl, '_blank');
+  };
+
+  // Popup notification when an international address is selected
+  useEffect(() => {
+    if (selectedAddress && shippingDetails.countryCode !== 'IN') {
+      const countryName = getCountryName(shippingDetails.countryCode);
+      setPopup({
+        title: `🌐 International Order (${countryName})`,
+        message: `For orders shipping outside India (${countryName}), standard online checkout and payment gateway are disabled. Please click "Order via WhatsApp" to send your pre-filled cart & address details directly to our team on WhatsApp for custom international shipping quotes.`,
+        primaryLabel: 'Order via WhatsApp 💬',
+        onPrimary: () => handleInternationalWhatsAppOrder(),
+        secondaryLabel: 'Got it',
+        onSecondary: () => setPopup(null),
+      });
+    }
+  }, [selectedAddress?.id, shippingDetails.countryCode]);
+
   const loadRazorpayScript = () => {
     return new Promise((resolve, reject) => {
       if (window.Razorpay) { resolve(); return; }
@@ -407,6 +465,11 @@ const CheckoutView = () => {
         primaryLabel: 'Add Address',
         onPrimary: () => setShowAddressForm(true),
       });
+      return;
+    }
+
+    if (shippingDetails.countryCode !== 'IN') {
+      handleInternationalWhatsAppOrder();
       return;
     }
 
@@ -761,59 +824,71 @@ const CheckoutView = () => {
             {/* Payment Method */}
             <div className="mb-6">
               <h2 className="text-base sm:text-lg md:text-xl font-bold text-gray-800 mb-4">Payment Method</h2>
-              <div className="space-y-3">
-                <button
-                  type="button"
-                  onClick={() => { if (shippingDetails.codAvailable) setPaymentMethod('cod'); }}
-                  disabled={!shippingDetails.codAvailable}
-                  className={`w-full text-left rounded-xl p-4 border ${
-                    !shippingDetails.codAvailable
-                      ? 'border-gray-200 bg-gray-100 opacity-60 cursor-not-allowed'
-                      : paymentMethod === 'cod' ? 'border-emerald-600 bg-emerald-50' : 'border-gray-200 bg-white'
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <input readOnly type="radio" checked={paymentMethod === 'cod'} className="mt-1" disabled={!shippingDetails.codAvailable} />
-                    <div>
-                      <p className="font-semibold text-gray-800 text-xs sm:text-sm">Cash on Delivery (COD)</p>
-                      {!shippingDetails.codAvailable ? (
-                        <p className="text-xs sm:text-sm text-amber-700">Not available for this delivery location</p>
-                      ) : isCustom ? (
-                        <p className="text-xs sm:text-sm text-gray-600">Pay ₹100 advance now (Razorpay), balance ₹{balance.toFixed(2)} on delivery</p>
-                      ) : (
-                        <p className="text-xs sm:text-sm text-gray-600">Pay on delivery — no advance required</p>
-                      )}
-                    </div>
+              {shippingDetails.countryCode !== 'IN' ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-5 text-amber-900 space-y-3 shadow-sm">
+                  <div className="flex items-center gap-2.5 font-bold text-sm sm:text-base text-amber-900">
+                    <Globe className="w-5 h-5 text-amber-600 shrink-0" />
+                    <span>International Shipping Notice ({getCountryName(shippingDetails.countryCode)})</span>
                   </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('online')}
-                  className={`w-full text-left rounded-xl p-4 border ${paymentMethod === 'online' ? 'border-emerald-600 bg-emerald-50' : 'border-gray-200 bg-white'}`}
-                >
-                  <div className="flex items-start gap-3">
-                    <input readOnly type="radio" checked={paymentMethod === 'online'} className="mt-1" />
-                    <div>
-                      <p className="font-semibold text-gray-800 text-xs sm:text-sm">Online Payment (UPI / Card / Netbanking)</p>
-                      <p className="text-xs sm:text-sm text-gray-600">
-                        {isCustom
-                          ? `Pay ₹${advance.toFixed(2)} advance now, balance ₹${balance.toFixed(2)} on delivery`
-                          : `Pay ₹${total.toFixed(2)} securely through Razorpay`}
-                      </p>
+                  <p className="text-xs sm:text-sm leading-relaxed text-amber-800">
+                    Standard online payments and COD are disabled for international destinations. Please click the <strong>"Order via WhatsApp"</strong> button below to send your pre-filled order & address details to our team on WhatsApp for custom shipping quotes and payment instructions.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    onClick={() => { if (shippingDetails.codAvailable) setPaymentMethod('cod'); }}
+                    disabled={!shippingDetails.codAvailable}
+                    className={`w-full text-left rounded-xl p-4 border ${
+                      !shippingDetails.codAvailable
+                        ? 'border-gray-200 bg-gray-100 opacity-60 cursor-not-allowed'
+                        : paymentMethod === 'cod' ? 'border-emerald-600 bg-emerald-50' : 'border-gray-200 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <input readOnly type="radio" checked={paymentMethod === 'cod'} className="mt-1" disabled={!shippingDetails.codAvailable} />
+                      <div>
+                        <p className="font-semibold text-gray-800 text-xs sm:text-sm">Cash on Delivery (COD)</p>
+                        {!shippingDetails.codAvailable ? (
+                          <p className="text-xs sm:text-sm text-amber-700">Not available for this delivery location</p>
+                        ) : isCustom ? (
+                          <p className="text-xs sm:text-sm text-gray-600">Pay ₹100 advance now (Razorpay), balance ₹{balance.toFixed(2)} on delivery</p>
+                        ) : (
+                          <p className="text-xs sm:text-sm text-gray-600">Pay on delivery — no advance required</p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </button>
-              </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('online')}
+                    className={`w-full text-left rounded-xl p-4 border ${paymentMethod === 'online' ? 'border-emerald-600 bg-emerald-50' : 'border-gray-200 bg-white'}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <input readOnly type="radio" checked={paymentMethod === 'online'} className="mt-1" />
+                      <div>
+                        <p className="font-semibold text-gray-800 text-xs sm:text-sm">Online Payment (UPI / Card / Netbanking)</p>
+                        <p className="text-xs sm:text-sm text-gray-600">
+                          {isCustom
+                            ? `Pay ₹${advance.toFixed(2)} advance now, balance ₹${balance.toFixed(2)} on delivery`
+                            : `Pay ₹${total.toFixed(2)} securely through Razorpay`}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="space-y-3">
-              {/* Shipping via Delhivery */}
+              {/* Shipping Information */}
               <div className="rounded-xl bg-emerald-50 p-4 space-y-2">
                 <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-700">
                   <Truck className="w-4 h-4 text-emerald-600 shrink-0" />
                   <span>
                     {shippingDetails.countryCode !== 'IN' ? (
-                      <>🌍 International ({getCountryName(shippingDetails.countryCode)}) · {shippingDetails.totalWeight.toFixed(2)} kg total</>
+                      <>🌍 International ({getCountryName(shippingDetails.countryCode)}) · {shippingDetails.totalWeight.toFixed(2)} kg total weight</>
                     ) : (
                       <>📦 Domestic delivery · pincode {selectedAddress?.pincode || '—'}</>
                     )}
@@ -828,7 +903,7 @@ const CheckoutView = () => {
                   <>
                     <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-700">
                       <Wallet className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Shipping: {shipping === 0 ? 'Free' : `₹${shipping.toFixed(2)}`}{delhiveryCharge ? ' (Delhivery rate)' : ' (fallback rate)'}</span>
+                      <span>Shipping: {shippingDetails.countryCode !== 'IN' ? `₹${shipping.toFixed(2)} (estimated table rate)` : (shipping === 0 ? 'Free' : `₹${shipping.toFixed(2)}` + (delhiveryCharge ? ' (Delhivery rate)' : ' (fallback rate)'))}</span>
                     </div>
                     <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-700">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -836,7 +911,7 @@ const CheckoutView = () => {
                     </div>
                   </>
                 )}
-                {!shippingDetails.codAvailable && (
+                {shippingDetails.countryCode === 'IN' && !shippingDetails.codAvailable && (
                   <div className="flex items-center gap-2 text-xs sm:text-sm text-amber-700">
                     <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0" />
                     <span>COD not available — please use online payment</span>
@@ -845,10 +920,20 @@ const CheckoutView = () => {
               </div>
             </div>
 
-            <button onClick={handlePlaceOrder} className="mt-6 w-full btn-primary py-3 sm:py-4 text-sm sm:text-lg font-bold flex items-center justify-center gap-2">
-              <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
-              Place Order
-            </button>
+            {shippingDetails.countryCode !== 'IN' ? (
+              <button
+                onClick={handleInternationalWhatsAppOrder}
+                className="mt-6 w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3.5 sm:py-4 px-6 rounded-2xl text-sm sm:text-lg font-bold flex items-center justify-center gap-2.5 shadow-lg shadow-emerald-600/30 transition-all hover:scale-[1.01] active:scale-[0.99]"
+              >
+                <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6" />
+                Order via WhatsApp
+              </button>
+            ) : (
+              <button onClick={handlePlaceOrder} className="mt-6 w-full btn-primary py-3 sm:py-4 text-sm sm:text-lg font-bold flex items-center justify-center gap-2">
+                <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
+                Place Order
+              </button>
+            )}
           </motion.div>
 
           {/* Order Summary Sidebar */}
