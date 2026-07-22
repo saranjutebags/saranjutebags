@@ -54,18 +54,77 @@ const computeDiscount = (subtotal, discountInfo) => {
 
 const countries = [
   { code: '+91', label: 'India (+91)' },
-  { code: '+1', label: 'USA / Canada (+1)' },
+  { code: '+1', label: 'United States / Canada (+1)' },
   { code: '+44', label: 'United Kingdom (+44)' },
+  { code: '+971', label: 'United Arab Emirates (+971)' },
   { code: '+61', label: 'Australia (+61)' },
-  { code: '+971', label: 'UAE (+971)' },
   { code: '+49', label: 'Germany (+49)' },
   { code: '+65', label: 'Singapore (+65)' },
   { code: '+60', label: 'Malaysia (+60)' },
+  { code: '+966', label: 'Saudi Arabia (+966)' },
+  { code: '+974', label: 'Qatar (+974)' },
+  { code: '+965', label: 'Kuwait (+965)' },
+  { code: '+968', label: 'Oman (+968)' },
+  { code: '+973', label: 'Bahrain (+973)' },
+  { code: '+33', label: 'France (+33)' },
+  { code: '+39', label: 'Italy (+39)' },
+  { code: '+34', label: 'Spain (+34)' },
+  { code: '+31', label: 'Netherlands (+31)' },
+  { code: '+41', label: 'Switzerland (+41)' },
+  { code: '+46', label: 'Sweden (+46)' },
+  { code: '+47', label: 'Norway (+47)' },
+  { code: '+45', label: 'Denmark (+45)' },
+  { code: '+353', label: 'Ireland (+353)' },
+  { code: '+32', label: 'Belgium (+32)' },
+  { code: '+43', label: 'Austria (+43)' },
+  { code: '+351', label: 'Portugal (+351)' },
+  { code: '+30', label: 'Greece (+30)' },
+  { code: '+48', label: 'Poland (+48)' },
+  { code: '+81', label: 'Japan (+81)' },
+  { code: '+82', label: 'South Korea (+82)' },
+  { code: '+64', label: 'New Zealand (+64)' },
+  { code: '+27', label: 'South Africa (+27)' },
+  { code: '+94', label: 'Sri Lanka (+94)' },
+  { code: '+977', label: 'Nepal (+977)' },
+  { code: '+880', label: 'Bangladesh (+880)' },
+  { code: '+92', label: 'Pakistan (+92)' },
+  { code: '+62', label: 'Indonesia (+62)' },
+  { code: '+63', label: 'Philippines (+63)' },
+  { code: '+66', label: 'Thailand (+66)' },
+  { code: '+84', label: 'Vietnam (+84)' },
+  { code: '+55', label: 'Brazil (+55)' },
+  { code: '+52', label: 'Mexico (+52)' },
+  { code: '+54', label: 'Argentina (+54)' },
+  { code: '+56', label: 'Chile (+56)' },
+  { code: '+57', label: 'Colombia (+57)' },
+  { code: '+51', label: 'Peru (+51)' },
+  { code: '+20', label: 'Egypt (+20)' },
+  { code: '+234', label: 'Nigeria (+234)' },
+  { code: '+254', label: 'Kenya (+254)' },
+  { code: '+212', label: 'Morocco (+212)' },
+  { code: '+90', label: 'Turkey (+90)' },
+  { code: '+972', label: 'Israel (+972)' },
+  { code: '+962', label: 'Jordan (+962)' },
+  { code: '+961', label: 'Lebanon (+961)' },
+  { code: '+86', label: 'China (+86)' },
+  { code: '+852', label: 'Hong Kong (+852)' },
+  { code: '+886', label: 'Taiwan (+886)' },
+  { code: '+7', label: 'Russia / Kazakhstan (+7)' },
 ];
 
 const phoneToCountryCode = {
-  '+91': 'IN', '+1': 'US', '+44': 'GB', '+61': 'AU',
-  '+971': 'AE', '+49': 'DE', '+65': 'SG', '+60': 'MY',
+  '+91': 'IN', '+1': 'US', '+44': 'GB', '+971': 'AE', '+61': 'AU',
+  '+49': 'DE', '+65': 'SG', '+60': 'MY', '+966': 'SA', '+974': 'QA',
+  '+965': 'KW', '+968': 'OM', '+973': 'BH', '+33': 'FR', '+39': 'IT',
+  '+34': 'ES', '+31': 'NL', '+41': 'CH', '+46': 'SE', '+47': 'NO',
+  '+45': 'DK', '+353': 'IE', '+32': 'BE', '+43': 'AT', '+351': 'PT',
+  '+30': 'GR', '+48': 'PL', '+81': 'JP', '+82': 'KR', '+64': 'NZ',
+  '+27': 'ZA', '+94': 'LK', '+977': 'NP', '+880': 'BD', '+92': 'PK',
+  '+62': 'ID', '+63': 'PH', '+66': 'TH', '+84': 'VN', '+55': 'BR',
+  '+52': 'MX', '+54': 'AR', '+56': 'CL', '+57': 'CO', '+51': 'PE',
+  '+20': 'EG', '+234': 'NG', '+254': 'KE', '+212': 'MA', '+90': 'TR',
+  '+972': 'IL', '+962': 'JO', '+961': 'LB', '+86': 'CN', '+852': 'HK',
+  '+886': 'TW', '+7': 'RU',
 };
 
 const detectCountryCode = (phone = '') => {
@@ -562,7 +621,7 @@ const CheckoutView = () => {
         const product = products.find(p => String(p.id) === String(item.id));
         if (product && product.stock !== undefined) {
           const newStock = Math.max(0, product.stock - item.quantity);
-          await updateProductStock(item.id, newStock, `Order ${orderId} placed`).catch(() => {});
+          await updateProductStock(item.id, newStock, `Order ${orderId} placed`).catch(() => { });
         }
       }
 
@@ -840,11 +899,10 @@ const CheckoutView = () => {
                     type="button"
                     onClick={() => { if (shippingDetails.codAvailable) setPaymentMethod('cod'); }}
                     disabled={!shippingDetails.codAvailable}
-                    className={`w-full text-left rounded-xl p-4 border ${
-                      !shippingDetails.codAvailable
+                    className={`w-full text-left rounded-xl p-4 border ${!shippingDetails.codAvailable
                         ? 'border-gray-200 bg-gray-100 opacity-60 cursor-not-allowed'
                         : paymentMethod === 'cod' ? 'border-emerald-600 bg-emerald-50' : 'border-gray-200 bg-white'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-start gap-3">
                       <input readOnly type="radio" checked={paymentMethod === 'cod'} className="mt-1" disabled={!shippingDetails.codAvailable} />
