@@ -48,13 +48,19 @@ const LandingView = () => {
           fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&accept-language=en`)
             .then(r => r.json())
             .then(data => {
-              const addr = data.address;
-              setLocationName([addr.city_district || addr.city || addr.town, addr.state].filter(Boolean).join(', '));
+              const addr = data.address || {};
+              const streetLoc = addr.road || addr.suburb || addr.neighbourhood || addr.residential || addr.subdistrict || addr.hamlet || '';
+              const cityLoc = addr.city_district || addr.city || addr.town || addr.village || addr.county || '';
+              const stateLoc = addr.state || '';
+              const pinLoc = addr.postcode || '';
+              const exactParts = [streetLoc, cityLoc, stateLoc, pinLoc].filter(Boolean);
+              const exactAddress = exactParts.length > 0 ? exactParts.join(', ') : (data.display_name || '');
+              setLocationName(exactAddress);
             })
             .catch(() => setLocationName(''));
         },
         () => {},
-        { timeout: 5000, enableHighAccuracy: false }
+        { timeout: 5000, enableHighAccuracy: true }
       );
     }
   }, []);
@@ -73,10 +79,12 @@ const LandingView = () => {
 
         {/* Location badge */}
         {userLocation && (
-          <div className="absolute top-6 right-6 z-10">
-            <div className="flex items-center gap-2 bg-white/20 backdrop-blur-md text-white px-4 py-2 rounded-full text-xs sm:text-sm shadow-lg">
-              <Navigation className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span className="font-medium truncate max-w-[200px]">{locationName || `${userLocation.lat.toFixed(2)}, ${userLocation.lng.toFixed(2)}`}</span>
+          <div className="absolute top-6 right-6 z-10 max-w-sm sm:max-w-md">
+            <div className="flex items-center gap-2 bg-white/25 backdrop-blur-md text-white px-4 py-2.5 rounded-full text-xs sm:text-sm shadow-xl border border-white/30" title={locationName}>
+              <Navigation className="w-4 h-4 text-yellow-300 shrink-0 animate-pulse" />
+              <span className="font-semibold text-white truncate max-w-[280px] sm:max-w-[420px]">
+                📍 {locationName || `${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`}
+              </span>
             </div>
           </div>
         )}

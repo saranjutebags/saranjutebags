@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -46,6 +46,8 @@ import {
   ToggleLeft,
   ToggleRight,
   History,
+  Copy,
+  CheckCircle2,
 } from 'lucide-react';
 
 const AdminDashboard = () => {
@@ -53,7 +55,7 @@ const AdminDashboard = () => {
   const { products, categories, addProduct, updateProduct, deleteProduct, addCategory, updateCategory, deleteCategory, toggleCategoryVisibility, deleteProductReview, toggleReviewVisibility, updateProductStock } = useProducts();
   const { orders, updateOrder, deleteOrders } = useCart();
   const { pricingSettings, updatePricingSettings, warehouse, domesticShipping, internationalRates, updateWarehouse, updateDomesticShipping, updateInternationalShipping } = useCart();
-  const { companySettings, updateCompanySettings, banners, addBanner, updateBanner, deleteBanner, scrollingTexts, addScrollingText, updateScrollingText, deleteScrollingText, activityLogs, addActivityLog } = useAdmin();
+  const { companySettings, updateCompanySettings, banners, addBanner, updateBanner, deleteBanner, scrollingTexts, addScrollingText, updateScrollingText, deleteScrollingText, activityLogs, addActivityLog, testProductSettings, updateTestProductSettings } = useAdmin();
   const navigate = useNavigate();
   
   const [activeTab, setActiveTab] = useState('overview');
@@ -179,6 +181,7 @@ const AdminDashboard = () => {
   const [shipWeight, setShipWeight] = useState('');
   const [waybillInput, setWaybillInput] = useState('');
   const [showWaybillInput, setShowWaybillInput] = useState(false);
+  const [copiedDelhiveryFieldIdx, setCopiedDelhiveryFieldIdx] = useState(null);
 
   // Theme
   const [themeColors, setThemeColors] = useState({
@@ -2458,6 +2461,83 @@ const AdminDashboard = () => {
         <p className="text-xs text-gray-500 mt-3">Changes apply immediately. GST and shipping charges will be reflected in customer checkout.</p>
       </Card>
 
+      <Card title="🧪 Test Demo Product Settings (Razorpay Testing)">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between p-4 bg-emerald-50 rounded-xl border border-emerald-200">
+            <div>
+              <p className="font-bold text-gray-800 text-base">Enable Test Demo Product for Storefront</p>
+              <p className="text-xs text-gray-600">When enabled, this product is visible to users for testing Razorpay payments. Fixed manual values assigned below will be used without dynamic calculations.</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={testProductSettings?.enabled || false}
+                onChange={(e) => updateTestProductSettings({ enabled: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="space-y-1 md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700">Product Name</label>
+              <input
+                type="text"
+                value={testProductSettings?.name || ''}
+                onChange={(e) => updateTestProductSettings({ name: e.target.value })}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                placeholder="Demo Test Product"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="block text-sm font-medium text-gray-700">Manual Price (₹)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={testProductSettings?.price ?? 1.00}
+                onChange={(e) => updateTestProductSettings({ price: Number(e.target.value) })}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="block text-sm font-medium text-gray-700">Manual GST Amount (₹)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={testProductSettings?.gstAmount ?? 0.18}
+                onChange={(e) => updateTestProductSettings({ gstAmount: Number(e.target.value) })}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="block text-sm font-medium text-gray-700">Manual Delivery Fee (₹)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={testProductSettings?.deliveryFee ?? 0.00}
+                onChange={(e) => updateTestProductSettings({ deliveryFee: Number(e.target.value) })}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+          </div>
+
+          <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 flex flex-wrap items-center justify-between gap-3 text-sm">
+            <div className="flex items-center gap-4">
+              <span>Base: <strong>₹{(testProductSettings?.price || 0).toFixed(2)}</strong></span>
+              <span>+ GST: <strong>₹{(testProductSettings?.gstAmount || 0).toFixed(2)}</strong></span>
+              <span>+ Delivery: <strong>₹{(testProductSettings?.deliveryFee || 0).toFixed(2)}</strong></span>
+            </div>
+            <div className="text-emerald-700 font-bold text-base">
+              Calculated Test Total: ₹{((testProductSettings?.price || 0) + (testProductSettings?.gstAmount || 0) + (testProductSettings?.deliveryFee || 0)).toFixed(2)}
+            </div>
+          </div>
+        </div>
+      </Card>
+
       <Card title="Warehouse Location">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1">
@@ -3533,61 +3613,123 @@ const AdminDashboard = () => {
 
       {/* Ship with Delhivery Form Modal */}
       <AnimatePresence>
-        {showShipForm && shipTargetOrder && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-              onClick={() => setShowShipForm(false)}
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                  <Truck className="w-5 h-5 text-blue-600" />
-                  Ship with Delhivery
-                </h2>
-                <button onClick={() => setShowShipForm(false)} className="p-2 hover:bg-gray-100 rounded-full">
-                  <X className="w-5 h-5 text-gray-500" />
-                </button>
-              </div>
-              <div className="space-y-4">
-                <div className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3 space-y-1">
-                  <p><strong>Order:</strong> {shipTargetOrder.id}</p>
-                  <p><strong>Customer:</strong> {shipTargetOrder.shippingAddress?.name}</p>
-                  <p><strong>To:</strong> {shipTargetOrder.shippingAddress?.city}, {shipTargetOrder.shippingAddress?.pincode}</p>
-                </div>
-                <p className="text-sm text-gray-600">Clicking below will open the Delhivery shipping page in a new tab. After completing the shipment on Delhivery, you'll be able to enter the waybill number.</p>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setShowShipForm(false)}
-                    className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-all"
-                  >
-                    Cancel
+        {showShipForm && shipTargetOrder && (() => {
+          const addr = shipTargetOrder.shippingAddress || {};
+          const items = shipTargetOrder.items || shipTargetOrder.cart || [];
+          const totalWeightGrams = items.reduce((sum, item) => sum + ((item.weightKg || item.weight || 0.3) * 1000 * (item.quantity || 1)), 0);
+          const fullAddress = [addr.street || addr.address, addr.area || addr.suburb, addr.city, addr.state, addr.country].filter(Boolean).join(', ');
+          const fields = [
+            { label: 'Order ID / Reference', value: shipTargetOrder.id, hint: 'Paste into "Order ID" field on Delhivery' },
+            { label: 'Customer Name', value: addr.name || '', hint: 'Seller / Customer Details → Name' },
+            { label: 'Phone Number', value: (addr.phone || '').replace(/^\+91/, '').replace(/\s/g, ''), hint: 'Customer phone (without country code)' },
+            { label: 'Full Address', value: fullAddress, hint: 'Customer delivery address' },
+            { label: 'Pincode', value: addr.pincode || '', hint: 'Delivery pincode' },
+            { label: 'State', value: addr.state || '', hint: 'Destination state' },
+            { label: 'City', value: addr.city || '', hint: 'Destination city' },
+            { label: 'Package Weight (gm)', value: String(Math.max(Math.round(totalWeightGrams), 50)), hint: 'Box Details → Package weight (min 50 gm)' },
+            { label: 'Payment Mode', value: shipTargetOrder.paymentMethod === 'cod' ? 'COD' : 'Pre-Paid', hint: 'Payment Details → Payment Mode' },
+            { label: 'COD Amount (₹)', value: shipTargetOrder.paymentMethod === 'cod' ? String(shipTargetOrder.pricing?.grandTotal || shipTargetOrder.total || '') : '0', hint: 'Only if COD — amount to collect' },
+          ];
+          const copyField = (val, idx) => {
+            navigator.clipboard.writeText(val).then(() => {
+              setCopiedDelhiveryFieldIdx(idx);
+              setTimeout(() => setCopiedDelhiveryFieldIdx(null), 1500);
+            });
+          };
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                onClick={() => setShowShipForm(false)}
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+              >
+                {/* Header */}
+                <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center">
+                      <Truck className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-gray-800">Ship via Delhivery One</h2>
+                      <p className="text-xs text-gray-500">Copy each field → paste into Delhivery form</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setShowShipForm(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                    <X className="w-5 h-5 text-gray-500" />
                   </button>
-                  <button
-                    onClick={async () => {
-                      setShowShipForm(false);
-                      await handleShipWithDelhivery(shipTargetOrder);
-                    }}
-                    disabled={delhiveryShipping}
-                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
-                  >
-                    <Truck className="w-4 h-4" />
-                    Open Delhivery
-                  </button>
                 </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
+
+                <div className="px-6 py-5 space-y-3">
+                  {/* Step indicator */}
+                  <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
+                    <span className="text-lg">💡</span>
+                    <span>Open Delhivery (button below), then copy each field here and paste it into the matching field on Delhivery One.</span>
+                  </div>
+
+                  {/* Fields */}
+                  {fields.map((f, idx) => (
+                    <div key={idx} className="border border-gray-200 rounded-xl overflow-hidden">
+                      <div className="flex items-center justify-between bg-gray-50 px-3 py-1.5 border-b border-gray-200">
+                        <span className="text-xs font-semibold text-gray-600">{f.label}</span>
+                        <span className="text-[10px] text-gray-400 italic hidden sm:block">{f.hint}</span>
+                      </div>
+                      <div className="flex items-center gap-2 px-3 py-2">
+                        <span className="flex-1 font-mono text-sm text-gray-800 break-all">{f.value || <span className="text-gray-400 italic">—</span>}</span>
+                        {f.value && (
+                          <button
+                            onClick={() => copyField(f.value, idx)}
+                            className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all ${
+                              copiedDelhiveryFieldIdx === idx
+                                ? 'bg-emerald-500 text-white'
+                                : 'bg-gray-100 hover:bg-blue-100 hover:text-blue-700 text-gray-600'
+                            }`}
+                          >
+                            {copiedDelhiveryFieldIdx === idx ? (
+                              <><CheckCircle2 className="w-3 h-3" /> Copied!</>
+                            ) : (
+                              <><Copy className="w-3 h-3" /> Copy</>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Action buttons */}
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      onClick={() => setShowShipForm(false)}
+                      className="flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all text-sm font-semibold"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setShowShipForm(false);
+                        await handleShipWithDelhivery(shipTargetOrder);
+                      }}
+                      disabled={delhiveryShipping}
+                      className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2 text-sm font-semibold"
+                    >
+                      <Truck className="w-4 h-4" />
+                      Open Delhivery One ↗
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
+
 
       {/* Waybill Input Modal */}
       <AnimatePresence>

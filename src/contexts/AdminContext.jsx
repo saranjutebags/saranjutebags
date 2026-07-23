@@ -14,6 +14,25 @@ const STORAGE_KEYS = {
   security: 'saran-jute-security-settings',
   roles: 'saran-jute-admin-roles',
   scrollingTexts: 'saran-jute-scrolling-texts',
+  testProductSettings: 'saran-jute-test-product-settings',
+};
+
+const defaultTestProductSettings = {
+  enabled: false,
+  id: 'test-demo-product',
+  name: 'Demo Test Product (Razorpay Testing)',
+  price: 1.00,
+  gstAmount: 0.18,
+  deliveryFee: 0.00,
+  category: 'Jute Bags',
+  image: '/Jute-Bags-1.webp',
+  images: ['/Jute-Bags-1.webp'],
+  description: 'Test demo product for testing Razorpay payments. Manual pricing assigned by Admin.',
+  sku: 'DEMO-TEST',
+  isTestProduct: true,
+  stock: 999,
+  visible: true,
+  archived: false,
 };
 
 const readJson = (key, fallback) => {
@@ -151,6 +170,7 @@ export const AdminProvider = ({ children }) => {
   const [security, setSecurity] = useState(() => readJson(STORAGE_KEYS.security, defaultSecurity));
   const [roles, setRoles] = useState(() => readJson(STORAGE_KEYS.roles, defaultRoles));
   const [scrollingTexts, setScrollingTexts] = useState(() => readJson(STORAGE_KEYS.scrollingTexts, defaultScrollingTexts));
+  const [testProductSettings, setTestProductSettings] = useState(() => readJson(STORAGE_KEYS.testProductSettings, defaultTestProductSettings));
   const [activityLogs, setActivityLogs] = useState(() => readJson('saran-jute-activity-logs', [
     { id: 'log-1', timestamp: new Date(Date.now() - 3600000).toLocaleString(), action: 'Admin panel initialized', user: 'system' },
     { id: 'log-2', timestamp: new Date().toLocaleString(), action: 'Security settings updated', user: 'saranjutebags@gmail.com' }
@@ -250,6 +270,14 @@ export const AdminProvider = ({ children }) => {
       }
     });
 
+    const unsubTestProduct = onSnapshot(doc(db, 'settings', 'testProduct'), (snap) => {
+      if (snap.exists()) {
+        setTestProductSettings(snap.data());
+      } else {
+        setDoc(doc(db, 'settings', 'testProduct'), defaultTestProductSettings);
+      }
+    });
+
     return () => {
       unsubCompany();
       unsubHomepage();
@@ -260,6 +288,7 @@ export const AdminProvider = ({ children }) => {
       unsubNotifications();
       unsubLogs();
       unsubScrollingTexts();
+      unsubTestProduct();
     };
   }, []);
 
@@ -539,6 +568,25 @@ export const AdminProvider = ({ children }) => {
     addActivityLog('Deleted scrolling text');
   };
 
+  const updateTestProductSettings = (updates) => {
+    setTestProductSettings((prev) => {
+      const next = { ...prev, ...updates };
+      if (isFirebaseActive) {
+        setDoc(doc(db, 'settings', 'testProduct'), next);
+      } else {
+        writeJson(STORAGE_KEYS.testProductSettings, next);
+      }
+      return next;
+    });
+    addActivityLog('Updated Test Demo Product settings');
+  };
+
+  useEffect(() => {
+    if (!isFirebaseActive) {
+      writeJson(STORAGE_KEYS.testProductSettings, testProductSettings);
+    }
+  }, [testProductSettings]);
+
   const value = useMemo(() => ({
     companySettings,
     homepage,
@@ -551,6 +599,8 @@ export const AdminProvider = ({ children }) => {
     activityLogs,
     loginHistory,
     deviceHistory,
+    testProductSettings,
+    updateTestProductSettings,
     addActivityLog,
     addLoginHistory,
     updateCompanySettings,
@@ -573,7 +623,7 @@ export const AdminProvider = ({ children }) => {
     addScrollingText,
     updateScrollingText,
     deleteScrollingText,
-  }), [banners, companySettings, homepage, notifications, popups, reviews, roles, security, activityLogs, loginHistory, deviceHistory, scrollingTexts]);
+  }), [banners, companySettings, homepage, notifications, popups, reviews, roles, security, activityLogs, loginHistory, deviceHistory, scrollingTexts, testProductSettings]);
 
   return <AdminContext.Provider value={value}>{children}</AdminContext.Provider>;
 };

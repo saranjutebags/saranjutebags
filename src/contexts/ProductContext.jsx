@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { db, isFirebaseActive } from '../firebase/config';
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { useAdmin } from './AdminContext';
 
 const ProductContext = createContext();
 
@@ -79,11 +80,51 @@ export const ProductProvider = ({ children }) => {
     };
   }, []);
 
-  const getProductById = (id) => products.find((product) => String(product.id) === String(id));
-  const getFeaturedProducts = () => products.filter((product) => product.featured && product.visible && !product.archived);
-  const getBestsellers = () => products.filter((product) => product.bestseller && product.visible && !product.archived);
-  const getNewArrivals = () => products.filter((product) => product.newArrival && product.visible && !product.archived);
-  const getProductsByCategory = (category) => products.filter((product) => product.category === category && product.visible && !product.archived);
+  const { testProductSettings } = useAdmin();
+
+  const testProductObject = useMemo(() => {
+    if (!testProductSettings?.enabled) return null;
+    const totalPrice = Number(testProductSettings.price || 0) + Number(testProductSettings.gstAmount || 0) + Number(testProductSettings.deliveryFee || 0);
+    return {
+      id: 'test-demo-product',
+      name: testProductSettings.name || 'Demo Test Product (Razorpay Testing)',
+      price: Number(testProductSettings.price ?? 1.00),
+      originalPrice: totalPrice,
+      gstAmount: Number(testProductSettings.gstAmount ?? 0),
+      deliveryFee: Number(testProductSettings.deliveryFee ?? 0),
+      isTestProduct: true,
+      category: testProductSettings.category || 'Jute Bags',
+      images: testProductSettings.images || ['/Jute-Bags-1.webp'],
+      description: testProductSettings.description || 'Demo product configured by Admin for testing Razorpay payment integration.',
+      sku: testProductSettings.sku || 'DEMO-TEST',
+      stock: 999,
+      visible: true,
+      archived: false,
+      featured: true,
+      bestseller: false,
+      newArrival: false,
+      rating: 5.0,
+      reviews: 1,
+      customerReviews: [{ id: 'rev-test', name: 'Admin Test', rating: 5, text: 'Demo Test Product for Razorpay testing', date: new Date().toLocaleDateString() }],
+      createdAt: new Date().toISOString(),
+    };
+  }, [testProductSettings]);
+
+  const allProducts = useMemo(() => {
+    if (testProductObject) {
+      const exists = products.some(p => String(p.id) === String(testProductObject.id));
+      if (!exists) {
+        return [testProductObject, ...products];
+      }
+    }
+    return products;
+  }, [products, testProductObject]);
+
+  const getProductById = (id) => allProducts.find((product) => String(product.id) === String(id));
+  const getFeaturedProducts = () => allProducts.filter((product) => product.featured && product.visible && !product.archived);
+  const getBestsellers = () => allProducts.filter((product) => product.bestseller && product.visible && !product.archived);
+  const getNewArrivals = () => allProducts.filter((product) => product.newArrival && product.visible && !product.archived);
+  const getProductsByCategory = (category) => allProducts.filter((product) => product.category === category && product.visible && !product.archived);
 
   const addProduct = async (product) => {
     const nextProduct = {
@@ -287,7 +328,7 @@ export const ProductProvider = ({ children }) => {
   };
 
   const value = useMemo(() => ({
-    products,
+    products: allProducts,
     categories,
     inventoryHistory,
     loading,
@@ -312,7 +353,7 @@ export const ProductProvider = ({ children }) => {
     addReview,
     deleteProductReview,
     toggleReviewVisibility,
-  }), [categories, products, inventoryHistory, loading]);
+  }), [categories, allProducts, inventoryHistory, loading]);
 
   return <ProductContext.Provider value={value}>{children}</ProductContext.Provider>;
 };
