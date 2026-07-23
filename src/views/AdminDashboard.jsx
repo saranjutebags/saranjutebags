@@ -2850,13 +2850,14 @@ const AdminDashboard = () => {
                 <Input label="Minimum Order Value" type="number" value={couponForm.minOrder} onChange={(e) => setCouponForm({ ...couponForm, minOrder: e.target.value })} />
                 <Input label="Maximum Discount" type="number" value={couponForm.maxDiscount} onChange={(e) => setCouponForm({ ...couponForm, maxDiscount: e.target.value })} />
               </div>
-              <div className="mt-4 flex gap-3">
-                <label className="flex items-center gap-2"><input type="checkbox" checked={couponForm.active} onChange={(e) => setCouponForm({ ...couponForm, active: e.target.checked })} /> Active</label>
-                <label className="flex items-center gap-2"><input type="checkbox" checked={couponForm.shouldPopup} onChange={(e) => setCouponForm({ ...couponForm, shouldPopup: e.target.checked })} /> Show as Popup</label>
+              <div className="mt-4 flex gap-4 flex-wrap">
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={couponForm.active} onChange={(e) => setCouponForm({ ...couponForm, active: e.target.checked })} /> Active</label>
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={couponForm.shouldPopup} onChange={(e) => setCouponForm({ ...couponForm, shouldPopup: e.target.checked })} /> Show as Popup</label>
+                <label className="flex items-center gap-2 text-sm font-semibold text-purple-700"><input type="checkbox" checked={Boolean(couponForm.newUsersOnly)} onChange={(e) => setCouponForm({ ...couponForm, newUsersOnly: e.target.checked })} /> 🌟 For New Users Only</label>
               </div>
               <div className="mt-4 flex gap-3">
                 <button onClick={handleSaveCoupon} disabled={loading} className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"><Save className="w-4 h-4" /> {loading ? 'Saving...' : editingCoupon ? 'Update Coupon' : 'Add Coupon'}</button>
-                {editingCoupon && <button onClick={() => { setEditingCoupon(null); setCouponForm({ code: '', label: '', discount: '', discountType: 'percentage', minOrder: 0, maxDiscount: 0, active: true, shouldPopup: false }); }} className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"><X className="w-4 h-4" /> Cancel</button>}
+                {editingCoupon && <button onClick={() => { setEditingCoupon(null); setCouponForm({ code: '', label: '', discount: '', discountType: 'percentage', minOrder: 0, maxDiscount: 0, active: true, shouldPopup: false, newUsersOnly: false }); }} className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"><X className="w-4 h-4" /> Cancel</button>}
               </div>
             </Card>
             <Card title="Coupon List">
@@ -2867,9 +2868,10 @@ const AdminDashboard = () => {
                       <p className="font-medium text-lg">{coupon.code}</p>
                       <p className="text-sm text-gray-500">{coupon.label}</p>
                       <p className="text-sm font-semibold text-blue-600">{coupon.discountType === 'percentage' ? `${coupon.discount}% off` : `₹${coupon.discount} off`}</p>
-                      <div className="flex gap-2 mt-2">
+                      <div className="flex gap-2 mt-2 flex-wrap">
                         <span className={`px-2 py-1 rounded text-xs ${coupon.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>{coupon.active ? 'Active' : 'Inactive'}</span>
                         {coupon.shouldPopup && <span className="px-2 py-1 rounded text-xs bg-purple-100 text-purple-700">Popup</span>}
+                        {coupon.newUsersOnly && <span className="px-2 py-1 rounded text-xs bg-indigo-100 text-indigo-700 font-semibold">🌟 New Users Only</span>}
                       </div>
                     </div>
                     <div className="flex gap-2">

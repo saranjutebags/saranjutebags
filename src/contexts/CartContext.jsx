@@ -63,9 +63,9 @@ export const CartProvider = ({ children }) => {
   const [cartToast, setCartToast] = useState(null);
   const seededDefaults = useRef(false);
   const [coupons, setCoupons] = useState(() => readJson(STORAGE_KEYS.coupons, [
-    { id: 'welcome10', code: 'WELCOME10', label: 'Welcome Offer', discount: '10% OFF', active: true, shouldPopup: true },
-    { id: 'jute15', code: 'JUTE15', label: 'Bulk Bag Deal', discount: '15% OFF', active: false, shouldPopup: false },
-    { id: 'save50', code: 'SAVE50', label: 'Festival Savings', discount: 'Flat ₹50 OFF', active: true, shouldPopup: false },
+    { id: 'welcome10', code: 'WELCOME10', label: 'Welcome Offer (First Order Only)', discount: '10% OFF', active: true, shouldPopup: true, newUsersOnly: true },
+    { id: 'jute15', code: 'JUTE15', label: 'Bulk Bag Deal', discount: '15% OFF', active: false, shouldPopup: false, newUsersOnly: false },
+    { id: 'save50', code: 'SAVE50', label: 'Festival Savings', discount: 'Flat ₹50 OFF', active: true, shouldPopup: false, newUsersOnly: false },
   ]));
 
   // Track active Firestore unsubscribers so we can tear down when user changes

@@ -1244,7 +1244,7 @@ const DashboardView = () => {
               className="w-full rounded-xl border border-gray-200 px-4 py-3 bg-white text-sm"
             />
           </div>
-          <div className="flex items-end gap-4">
+          <div className="flex items-end gap-4 flex-wrap">
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <input type="checkbox" checked={newCouponDraft.active} onChange={e => setNewCouponDraft({ ...newCouponDraft, active: e.target.checked })} className="w-4 h-4" />
               Active
@@ -1253,11 +1253,15 @@ const DashboardView = () => {
               <input type="checkbox" checked={newCouponDraft.shouldPopup} onChange={e => setNewCouponDraft({ ...newCouponDraft, shouldPopup: e.target.checked })} className="w-4 h-4" />
               Show as Popup
             </label>
+            <label className="flex items-center gap-2 text-sm font-semibold text-purple-700 cursor-pointer">
+              <input type="checkbox" checked={Boolean(newCouponDraft.newUsersOnly)} onChange={e => setNewCouponDraft({ ...newCouponDraft, newUsersOnly: e.target.checked })} className="w-4 h-4" />
+              🌟 For New Users Only
+            </label>
           </div>
           <div className="sm:col-span-2 flex gap-3">
             <button type="submit" className="btn-primary px-6 py-3">{editingCouponId ? 'Update Coupon' : 'Add Coupon'}</button>
             {editingCouponId && (
-              <button type="button" onClick={() => { setEditingCouponId(null); setNewCouponDraft({ code: '', label: '', discount: '', active: true, shouldPopup: false }); }} className="btn-secondary px-6 py-3">Cancel</button>
+              <button type="button" onClick={() => { setEditingCouponId(null); setNewCouponDraft({ code: '', label: '', discount: '', active: true, shouldPopup: false, newUsersOnly: false }); }} className="btn-secondary px-6 py-3">Cancel</button>
             )}
           </div>
         </form>
@@ -1271,17 +1275,18 @@ const DashboardView = () => {
         {coupons.map((coupon) => (
           <div key={coupon.id} className="rounded-2xl border border-emerald-100 bg-white p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <code className="px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-bold text-sm">{coupon.code}</code>
                 <button onClick={() => navigator.clipboard.writeText(coupon.code)} className="text-sm text-emerald-700 hover:text-emerald-800 flex items-center gap-1"><Copy className="w-3.5 h-3.5" />Copy</button>
                 {coupon.shouldPopup && <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">Popup</span>}
+                {coupon.newUsersOnly && <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-semibold">🌟 New Users Only</span>}
               </div>
               <p className="font-semibold text-gray-800">{coupon.label}</p>
               <p className="text-sm text-gray-600">{coupon.discount}</p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <button onClick={() => toggleCoupon(coupon.id)} className={`px-4 py-2 rounded-xl font-semibold text-sm ${coupon.active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-700'}`}>{coupon.active ? 'Enabled' : 'Disabled'}</button>
-              <button onClick={() => { setEditingCouponId(coupon.id); setNewCouponDraft({ code: coupon.code, label: coupon.label || '', discount: coupon.discount || '', active: coupon.active, shouldPopup: coupon.shouldPopup || false }); }} className="px-4 py-2 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 text-sm">Edit</button>
+              <button onClick={() => { setEditingCouponId(coupon.id); setNewCouponDraft({ code: coupon.code, label: coupon.label || '', discount: coupon.discount || '', active: coupon.active, shouldPopup: coupon.shouldPopup || false, newUsersOnly: coupon.newUsersOnly || false }); }} className="px-4 py-2 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 text-sm">Edit</button>
               <button onClick={() => deleteCoupon(coupon.id)} className="px-4 py-2 rounded-xl bg-rose-50 text-rose-700 hover:bg-rose-100 text-sm">Delete</button>
             </div>
           </div>

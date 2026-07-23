@@ -147,7 +147,7 @@ const getCountryCodeFromAddress = (address) => {
 };
 
 const CheckoutView = () => {
-  const { cart, cartTotal, addresses, getDefaultAddress, addAddress, updateAddress, addOrder, setLatestOrderItem, clearCart, setDefaultAddress, calculateOrderPricing, pricingSettings, coupons, warehouse, domesticShipping, internationalRates, updateOrder } = useCart();
+  const { cart, cartTotal, addresses, getDefaultAddress, addAddress, updateAddress, addOrder, setLatestOrderItem, clearCart, setDefaultAddress, calculateOrderPricing, pricingSettings, coupons, warehouse, domesticShipping, internationalRates, updateOrder, orders = [] } = useCart();
   const { user, userData } = useAuth();
   const { products, updateProductStock } = useProducts();
   const navigate = useNavigate();
@@ -172,6 +172,48 @@ const CheckoutView = () => {
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [couponError, setCouponError] = useState('');
   const [couponSuccess, setCouponSuccess] = useState('');
+
+  const handleApplyCoupon = (event) => {
+    event.preventDefault();
+    setCouponError('');
+    setCouponSuccess('');
+    const code = couponInput.trim().toUpperCase();
+    if (!code) {
+      setCouponError('Please enter a coupon code.');
+      return;
+    }
+    const found = coupons.find(c => c.code?.toUpperCase() === code && c.active);
+    if (!found) {
+      setCouponError('Invalid or expired coupon code. Please check and try again.');
+      return;
+    }
+
+    // 1. One-time use per customer check
+    const userOrders = orders || [];
+    const nonCancelledOrders = userOrders.filter(o => o.status !== 'Cancelled');
+    const alreadyUsed = nonCancelledOrders.some(o => 
+      (o.couponCode && o.couponCode.toUpperCase() === code) ||
+      (o.appliedCoupon?.code && o.appliedCoupon.code.toUpperCase() === code) ||
+      (o.couponId && o.couponId === found.id)
+    );
+
+    if (alreadyUsed) {
+      setCouponError(`You have already used coupon "${found.code}". Each coupon can only be used once per customer.`);
+      return;
+    }
+
+    // 2. New Users Only check
+    const isNewUser = nonCancelledOrders.length === 0;
+    if (found.newUsersOnly && !isNewUser) {
+      setCouponError(`Coupon "${found.code}" is valid for first-time customers on their first order only.`);
+      return;
+    }
+
+    setAppliedCoupon(found);
+    const discInfo = parseCouponDiscount(found.discount);
+    const discAmt = computeDiscount(cartTotal, discInfo);
+    setCouponSuccess(`🎉 Coupon "${found.code}" applied! You save ₹${discAmt.toFixed(2)}`);
+  };
 
   const selectedAddress = useMemo(
     () => addresses.find(address => address.id === selectedAddressId) || getDefaultAddress(),
@@ -485,24 +527,7 @@ const CheckoutView = () => {
     });
   };
 
-  const handleApplyCoupon = () => {
-    setCouponError('');
-    setCouponSuccess('');
-    const code = couponInput.trim().toUpperCase();
-    if (!code) {
-      setCouponError('Please enter a coupon code.');
-      return;
-    }
-    const found = coupons.find(c => c.code?.toUpperCase() === code && c.active);
-    if (!found) {
-      setCouponError('Invalid or expired coupon code. Please check and try again.');
-      return;
-    }
-    setAppliedCoupon(found);
-    const discInfo = parseCouponDiscount(found.discount);
-    const discAmt = computeDiscount(cartTotal, discInfo);
-    setCouponSuccess(`🎉 Coupon "${found.code}" applied! You save ₹${discAmt.toFixed(2)}`);
-  };
+
 
   const handleRemoveCoupon = () => {
     setAppliedCoupon(null);
@@ -837,15 +862,34 @@ const CheckoutView = () => {
                   {/* Show active coupons */}
                   {coupons.filter(c => c.active).length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {coupons.filter(c => c.active).map(c => (
-                        <button
-                          key={c.id}
-                          onClick={() => { setCouponInput(c.code); setCouponError(''); }}
-                          className="text-xs px-3 py-1.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 font-semibold hover:bg-emerald-100 transition-colors"
-                        >
-                          {c.code} — {c.discount}
-                        </button>
-                      ))}
+                      {coupons.filter(c => c.active).map(c => {
+                        const userOrders = orders || [];
+                        const nonCancelledOrders = userOrders.filter(o => o.status !== 'Cancelled');
+                        const isUsed = nonCancelledOrders.some(o => 
+                          (o.couponCode && o.couponCode.toUpperCase() === c.code?.toUpperCase()) ||
+                          (o.appliedCoupon?.code && o.appliedCoupon.code.toUpperCase() === c.code?.toUpperCase()) ||
+                          (o.couponId && o.couponId === c.id)
+                        );
+                        const isNewUserOnlyFail = c.newUsersOnly && nonCancelledOrders.length > 0;
+
+                        return (
+                          <button
+                            key={c.id}
+                            onClick={() => { setCouponInput(c.code); setCouponError(''); }}
+                            className={`text-xs px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${
+                              isUsed
+                                ? 'border-gray-200 bg-gray-100 text-gray-400 opacity-70 line-through'
+                                : isNewUserOnlyFail
+                                ? 'border-purple-200 bg-purple-50 text-purple-600 font-medium'
+                                : 'border-emerald-200 bg-emerald-50 text-emerald-700 font-semibold hover:bg-emerald-100'
+                            }`}
+                          >
+                            <span>{c.code} — {c.discount}</span>
+                            {c.newUsersOnly && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full font-bold">New Users</span>}
+                            {isUsed && <span className="text-[10px] bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full font-normal no-underline">Used</span>}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </>
