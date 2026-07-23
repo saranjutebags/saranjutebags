@@ -14,8 +14,8 @@ import { slugify } from '../utils/slugify';
 const branches = [
   {
     name: 'Mehdipatnam, Hyderabad',
-    address: '12-2-826/A/21, Priyanka College Lane, LIC Colony, Hyderabad, Telangana 500028',
-    mapLink: 'https://maps.app.goo.gl/dUEb8NMfGW98KdEf8',
+    address: '12-2-421/4 Alapathi Nagar Guddimalkapur, Hyderabad, Telangana 500028',
+    mapLink: 'https://maps.app.goo.gl/AMEQHcyeVYSBtxoa8',
   },
 
   {
@@ -450,7 +450,7 @@ const LandingView = () => {
             <div>
               <h4 className="font-bold mb-4">Contact</h4>
               <ul className="space-y-3 text-sm">
-                <li className="flex items-start gap-2 text-gray-400"><MapPin className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" /><span>12-2-420/4 Alapati Nagar, GudiMalkapur, Mehdipatnam, Hyderabad, Telangana 500028</span></li>
+                <li className="flex items-start gap-2 text-gray-400"><MapPin className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" /><span>12-2-421/4 Alapathi Nagar Guddimalkapur, Mehdipatnam, Hyderabad, Telangana 500028</span></li>
                 <li className="flex items-center gap-2 text-gray-400"><Phone className="w-4 h-4 text-emerald-500 shrink-0" /><span>+91 9866027027 / +91 9701000234</span></li>
                 <li className="flex items-center gap-2 text-gray-400"><Mail className="w-4 h-4 text-emerald-500 shrink-0" /><span>saranjutebags@gmail.com</span></li>
               </ul>

@@ -4,8 +4,9 @@ import SEOHead from '../components/SEOHead';
 
 const branches = [
   {
-    name: 'Hyderabad',
-    address: import.meta.env.VITE_HYDERABAD_ADDRESS || 'Mehdipatnam, Hyderabad, Telangana',
+    name: 'Hyderabad (Mehdipatnam)',
+    address: import.meta.env.VITE_HYDERABAD_ADDRESS || '12-2-421/4 Alapathi Nagar Guddimalkapur, Hyderabad, Telangana 500028',
+    mapLink: 'https://maps.app.goo.gl/AMEQHcyeVYSBtxoa8',
   },
   {
     name: 'Secunderabad',
@@ -39,7 +40,18 @@ const ContactView = () => {
           {branches.map((branch, index) => (
             <motion.div key={branch.name} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.08 }} className="glass rounded-3xl p-6 border border-emerald-100">
               <h2 className="text-xl font-bold text-gray-800 mb-2">{branch.name}</h2>
-              <p className="text-gray-600 text-sm leading-relaxed">{branch.address}</p>
+              <p className="text-gray-600 text-sm leading-relaxed mb-3">{branch.address}</p>
+              {branch.mapLink && (
+                <a
+                  href={branch.mapLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-emerald-600 hover:text-emerald-700 text-sm font-medium transition-colors"
+                >
+                  <MapPin className="w-4 h-4" />
+                  View on Google Maps
+                </a>
+              )}
             </motion.div>
           ))}
         </div>
@@ -50,7 +62,7 @@ const ContactView = () => {
             <div className="space-y-4 text-gray-700">
               <div className="flex items-center gap-3"><Phone className="w-5 h-5 text-emerald-600" /> {import.meta.env.VITE_PHONE_NUMBER || '+91 XXXXXXXXXX'}</div>
               <div className="flex items-center gap-3"><Mail className="w-5 h-5 text-emerald-600" /> {import.meta.env.VITE_SUPPORT_EMAIL || 'support@saranjutebags.in'}</div>
-              <div className="flex items-center gap-3"><MapPin className="w-5 h-5 text-emerald-600" /> {import.meta.env.VITE_HYDERABAD_ADDRESS || 'Mehdipatnam, Hyderabad, Telangana'}</div>
+              <div className="flex items-center gap-3"><MapPin className="w-5 h-5 text-emerald-600" /> {import.meta.env.VITE_HYDERABAD_ADDRESS || '12-2-421/4 Alapathi Nagar Guddimalkapur, Hyderabad, Telangana 500028'}</div>
             </div>
           </div>
 
