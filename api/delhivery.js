@@ -1,15 +1,4 @@
 module.exports = async (req, res) => {
-  // Allow cross-origin requests (needed when Hostinger frontend calls this Vercel API)
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Requested-With');
-
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
-
   console.log('[DelhiveryProxy] req.url:', req.url);
   console.log('[DelhiveryProxy] req.method:', req.method);
 

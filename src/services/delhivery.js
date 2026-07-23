@@ -1,8 +1,23 @@
 const API_KEY = import.meta.env.VITE_DELHIVERY_API_KEY || '';
-// If VITE_DELHIVERY_PROXY_URL is set (e.g. on Hostinger: your Vercel app URL),
-// route API calls there. Otherwise use the local /api/ path (works on Vercel + dev).
-const PROXY_BASE = (import.meta.env.VITE_DELHIVERY_PROXY_URL || '').replace(/\/$/, '');
-const apiUrl = (path) => `${PROXY_BASE}/api/delhivery${path}`;
+
+// Smart fetcher: tries proxy (/api/delhivery/...) first.
+// If local proxy fails (ERR_CONNECTION_REFUSED or 50x error), seamlessly falls back to direct API call (https://track.delhivery.com/...).
+const fetchWithFallback = async (path, options = {}) => {
+  const proxyUrl = `/api/delhivery${path}`;
+  const directUrl = `https://track.delhivery.com${path}`;
+
+  try {
+    const res = await fetch(proxyUrl, options);
+    if (res.ok || res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404) {
+      return res;
+    }
+    console.warn(`[Delhivery] Proxy returned status ${res.status}, trying direct URL`);
+  } catch (proxyErr) {
+    console.warn('[Delhivery] Proxy connection failed, falling back to direct API:', proxyErr.message);
+  }
+
+  return fetch(directUrl, options);
+};
 
 const authHeader = () => ({
   Authorization: `Token ${API_KEY}`,
@@ -15,7 +30,7 @@ export const fetchWaybill = async (count = 1, clientName = '') => {
   if (!API_KEY) return null;
   const params = new URLSearchParams({ count: String(count) });
   if (clientName) params.set('cl', clientName);
-  const response = await fetch(apiUrl(`/waybill/fetch/json/?${params}`), { headers: authHeader() });
+  const response = await fetchWithFallback(`/waybill/fetch/json/?${params}`, { headers: authHeader() });
   if (!response.ok) throw new Error(`Delhivery waybill error: ${response.status}`);
   const data = await response.json();
   if (typeof data === 'string' || typeof data === 'number') return { waybills: [String(data)] };
@@ -27,7 +42,7 @@ export const createShipment = async (shipmentPayload) => {
   if (!API_KEY) return null;
   const formBody = `format=json&data=${encodeURIComponent(JSON.stringify(shipmentPayload))}`;
   console.log('[Delhivery] Sending shipment payload:', JSON.stringify(shipmentPayload));
-  const response = await fetch(apiUrl('/cmu/create.json'), {
+  const response = await fetchWithFallback('/cmu/create.json', {
     method: 'POST',
     headers: {
       Authorization: `Token ${API_KEY}`,
@@ -51,7 +66,7 @@ export const createShipment = async (shipmentPayload) => {
 // ─── Pickup Request ────────────────────────────────────────
 export const requestPickup = async (pickupPayload) => {
   if (!API_KEY) return null;
-  const response = await fetch(apiUrl('/fm/request/new/'), {
+  const response = await fetchWithFallback('/fm/request/new/', {
     method: 'POST',
     headers: {
       ...authHeader(),
@@ -81,10 +96,8 @@ export const calculateShippingCharge = async ({ originPin, destPin, weightGrams,
     ss: 'Delivered',
     pt: isCOD ? 'COD' : 'Pre-paid',
   });
-  // Note: /api/kinko/v1/invoice/charges/.json is the current endpoint path.
-  // The old /kinko/v1/invoice/charges/ path (without /api/ prefix and .json suffix) is deprecated.
-  const url = apiUrl(`/api/kinko/v1/invoice/charges/.json?${params}`);
-  const response = await fetch(url, { headers: authHeader() });
+  const path = `/api/kinko/v1/invoice/charges/.json?${params}`;
+  const response = await fetchWithFallback(path, { headers: authHeader() });
   if (!response.ok) {
     const body = await response.text().catch(() => '');
     console.error(`[Delhivery] Charge HTTP ${response.status}:`, body.slice(0, 500));
@@ -130,7 +143,7 @@ export const calculateShippingCharge = async ({ originPin, destPin, weightGrams,
 // ─── Tracking ──────────────────────────────────────────────
 export const trackOrder = async (waybill) => {
   if (!API_KEY) return null;
-  const response = await fetch(apiUrl(`/v1/packages/json/?waybill=${encodeURIComponent(waybill)}`), { headers: authHeader() });
+  const response = await fetchWithFallback(`/v1/packages/json/?waybill=${encodeURIComponent(waybill)}`, { headers: authHeader() });
   if (!response.ok) throw new Error(`Delhivery tracking error: ${response.status}`);
   return response.json();
 };
@@ -138,7 +151,7 @@ export const trackOrder = async (waybill) => {
 // ─── Pincode Serviceability ────────────────────────────────
 export const checkPincodeServiceability = async (pincode) => {
   if (!API_KEY) return null;
-  const response = await fetch(apiUrl(`/c/pin-codes/json/?filter_codes=${pincode}`), { headers: authHeader() });
+  const response = await fetchWithFallback(`/c/pin-codes/json/?filter_codes=${pincode}`, { headers: authHeader() });
   if (!response.ok) throw new Error(`Delhivery pincode error: ${response.status}`);
   return response.json();
 };
@@ -146,7 +159,7 @@ export const checkPincodeServiceability = async (pincode) => {
 // ─── Warehouse Registration ───────────────────────────────
 export const registerWarehouse = async (warehouseData) => {
   if (!API_KEY) return null;
-  const response = await fetch(apiUrl('/backend/clientwarehouse/create/'), {
+  const response = await fetchWithFallback('/backend/clientwarehouse/create/', {
     method: 'POST',
     headers: {
       ...authHeader(),
@@ -179,7 +192,7 @@ export const registerWarehouse = async (warehouseData) => {
 // ─── Cancel Shipment ───────────────────────────────────────
 export const cancelShipment = async (waybill) => {
   if (!API_KEY) return null;
-  const response = await fetch(apiUrl('/p/edit'), {
+  const response = await fetchWithFallback('/p/edit', {
     method: 'POST',
     headers: {
       ...authHeader(),

@@ -10,7 +10,7 @@ export default defineConfig({
       '/api/delhivery': {
         target: 'https://track.delhivery.com',
         changeOrigin: true,
-        secure: true,
+        secure: false,
         rewrite: (path) => path.replace(/^\/api\/delhivery/, ''),
       },
     },
