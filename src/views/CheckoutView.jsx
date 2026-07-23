@@ -405,7 +405,8 @@ const CheckoutView = () => {
     }
 
     const amountPaise = Math.round(advance * 100);
-    const createRes = await fetch('/api/create-order', {
+    const _apiBase = (import.meta.env.VITE_DELHIVERY_PROXY_URL || '').replace(/\/$/, '');
+    const createRes = await fetch(`${_apiBase}/api/create-order`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -436,7 +437,7 @@ const CheckoutView = () => {
         order_id: order_id,
         handler: async (response) => {
           try {
-            const verifyRes = await fetch('/api/verify-payment', {
+            const verifyRes = await fetch(`${_apiBase}/api/verify-payment`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({

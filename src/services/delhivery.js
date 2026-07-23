@@ -1,7 +1,8 @@
 const API_KEY = import.meta.env.VITE_DELHIVERY_API_KEY || '';
-// Route all requests through our serverless proxy to avoid CORS issues.
-// The proxy (api/delhivery.js) forwards requests to track.delhivery.com server-side.
-const apiUrl = (path) => `/api/delhivery${path}`;
+// If VITE_DELHIVERY_PROXY_URL is set (e.g. on Hostinger: your Vercel app URL),
+// route API calls there. Otherwise use the local /api/ path (works on Vercel + dev).
+const PROXY_BASE = (import.meta.env.VITE_DELHIVERY_PROXY_URL || '').replace(/\/$/, '');
+const apiUrl = (path) => `${PROXY_BASE}/api/delhivery${path}`;
 
 const authHeader = () => ({
   Authorization: `Token ${API_KEY}`,

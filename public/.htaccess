@@ -1,0 +1,14 @@
+# Hostinger SPA Routing Fix
+# Redirect all non-file requests to index.html so React Router handles the routes
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Don't rewrite existing files or directories
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+
+  # Redirect everything else to index.html
+  RewriteRule ^ index.html [L]
+</IfModule>
