@@ -7,9 +7,6 @@ const CartView = () => {
   const { cart, updateQuantity, removeFromCart, clearCart, cartTotal, cartCount } = useCart();
   const navigate = useNavigate();
 
-  const shipping = cartTotal >= 999 ? 0 : 99;
-  const total = cartTotal + shipping;
-
   if (cart.length === 0) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16 flex items-center justify-center">
@@ -126,15 +123,9 @@ const CartView = () => {
                   <span className="text-gray-600">Subtotal</span>
                   <span className="font-semibold text-gray-800">₹{cartTotal}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-600">Shipping</span>
-                  <span className="font-semibold text-gray-800">
-                    {shipping === 0 ? 'Free' : `₹${shipping}`}
-                  </span>
-                </div>
                 <div className="border-t border-emerald-100 pt-4 flex items-center justify-between">
                   <span className="text-xl font-bold text-gray-800">Total</span>
-                  <span className="text-2xl font-bold text-gradient">₹{total}</span>
+                  <span className="text-2xl font-bold text-gradient">₹{cartTotal}</span>
                 </div>
               </div>
 

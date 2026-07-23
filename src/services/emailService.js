@@ -128,7 +128,7 @@ export const sendOrderStatusEmail = async (order, status) => {
     status_message: statusConfig.message,
     tracking_number: order.trackingNumber || 'N/A',
     estimated_delivery: order.estimatedDelivery || 'N/A',
-    tracking_link: `${window.location.origin}/orders/${order.id}`,
+    tracking_link: `https://saranjutebags.in/orders/${order.id}`,
     shipping_address: formatAddress(order.shippingAddress),
     delivery_address: formatAddress(order.shippingAddress),
     billing_address: formatAddress(order.billingAddress || order.shippingAddress),
