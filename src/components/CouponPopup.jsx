@@ -20,8 +20,6 @@ const CouponPopup = () => {
       if (!p.active) return false;
       if (p.startDate && new Date(p.startDate).getTime() > now) return false;
       if (p.endDate && new Date(p.endDate).getTime() < now) return false;
-      // Check sessionStorage for dismissed state
-      if (p.showOnce && sessionStorage.getItem(`popup-dismissed-${p.id}`) === '1') return false;
       return true;
     });
 

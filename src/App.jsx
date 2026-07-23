@@ -8,6 +8,7 @@ import Header from './components/Header';
 import ScrollToTop from './components/ScrollToTop';
 import CartToast from './components/CartToast';
 import HelpFloatButton from './components/HelpFloatButton';
+import CouponPopup from './components/CouponPopup';
 
 // Eagerly-loaded small views
 import LandingView from './views/LandingView';
@@ -93,6 +94,7 @@ const AppShell = () => {
       <Header />
       <CartToast />
       <HelpFloatButton />
+      <CouponPopup />
       <ScrollToTop />
       <Suspense fallback={<PageLoader />}>
         <Routes>

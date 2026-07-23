@@ -89,10 +89,7 @@ const defaultNotifications = [
   { id: 'note-1', title: 'Welcome Offer', type: 'Offer', message: 'Use WELCOME10 for 10% off.', active: false },
 ];
 
-const defaultScrollingTexts = [
-  { id: 'scroll-1', text: 'Free shipping on orders above ₹999', active: true },
-  { id: 'scroll-2', text: 'Use code WELCOME10 for 10% off', active: true },
-];
+const defaultScrollingTexts = [];
 
 const defaultSecurity = {
   twoFactor: false,
