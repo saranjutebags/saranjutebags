@@ -32,7 +32,7 @@ VITE_EMAILJS_TEMPLATE_ID=template_xxxxxxxx
 2. Create/select your project
 3. Go to Project Settings → General → Your apps
 4. Register a web app and copy the configuration values
-5. **IMPORTANT**: You must create the user `saranjutebags@gmail.com` in Firebase Authentication with password `admin$@saranjutebags`
+5. **IMPORTANT**: You must create the user `saranjutebags@gmail.com` in Firebase Authentication with password `yourpassword`
 
 ### OneSignal
 1. Go to [OneSignal Dashboard](https://onesignal.com/)
