@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useProducts } from '../contexts/ProductContext';
+import { useAdmin } from '../contexts/AdminContext';
 import UiPopup from '../components/UiPopup';
 import {
   isInternational, getCountryName,
@@ -262,39 +263,68 @@ const CheckoutView = () => {
       countryCode = getCountryCodeFromAddress(selectedAddress);
       const isIntl = isInternational(countryCode);
 
-      totalWeight = calcTotalWeight(cart);
+      totalWeight = calcTotalWeight(cart || []);
 
       if (isIntl) {
-        const rate = internationalRates.find(r => r.code === countryCode);
+        const rate = (internationalRates || []).find(r => r.code === countryCode);
         if (rate) {
           shippingCharge = calcInternationalShipping(totalWeight, rate.ratePerKg, rate.minCharge);
         } else {
-          shippingCharge = pricingSettings.shippingCharge;
+          shippingCharge = pricingSettings?.shippingCharge || 0;
         }
         codAvailable = false;
       } else {
-        shippingCharge = delhiveryCharge != null ? delhiveryCharge : (pricingSettings.shippingCharge || 0);
+        shippingCharge = delhiveryCharge != null ? delhiveryCharge : (pricingSettings?.shippingCharge || 0);
         codAvailable = getCodAvailability(countryCode);
       }
       estDelivery = '3-7 business days';
     } else {
-      shippingCharge = pricingSettings.shippingCharge;
+      shippingCharge = pricingSettings?.shippingCharge || 0;
     }
     return { shippingCharge, estDelivery, codAvailable, countryCode, totalWeight };
-  }, [selectedAddress, cart, cartTotal, internationalRates, delhiveryCharge]);
+  }, [selectedAddress, cart, cartTotal, internationalRates, delhiveryCharge, pricingSettings?.shippingCharge]);
 
-  // Override pricing with dynamic shipping
-  const dynamicShipping = shippingDetails.shippingCharge;
-  const dynamicTaxable = Math.max(cartTotal - couponDiscountAmount, 0);
-  const dynamicGst = Math.round(dynamicTaxable * (pricingSettings.gstRate / 100) * 100) / 100;
-  const dynamicTotal = Math.round((dynamicTaxable + dynamicShipping + dynamicGst) * 100) / 100;
+  const { testProductSettings } = useAdmin();
 
-  const pricing = calculateOrderPricing(cartTotal, couponDiscountAmount);
-  const shipping = dynamicShipping;
-  const gst = dynamicGst;
-  const total = dynamicTotal;
+  const cartList = cart || [];
+  const testItem = useMemo(() => cartList.find(item => item.isTestProduct || item.id === 'test-demo-product'), [cartList]);
+  const hasTestProduct = Boolean(testItem);
+
+  const isCustom = (customOrderEnabled && customOrder.quantity > 0) || cartList.some(item => item.customText || item.customLogo || item.category === 'Customized' || item.subCategory === 'Custom');
+  const customOrderFee = isCustom ? 100 : 0;
+
+  const calculatedPricing = useMemo(() => {
+    if (hasTestProduct && testItem) {
+      const subtotal = Number(testItem.price || 1.00) * Number(testItem.quantity || 1);
+      const shipping = Number(testItem.deliveryFee !== undefined ? testItem.deliveryFee : (testProductSettings?.deliveryFee ?? 0));
+      const gst = Number(testItem.gstAmount !== undefined ? testItem.gstAmount : (testProductSettings?.gstAmount ?? 0)) * Number(testItem.quantity || 1);
+      const total = Math.round((subtotal - couponDiscountAmount + shipping + gst + customOrderFee) * 100) / 100;
+      return { subtotal, shipping, gst, total, isTest: true };
+    } else {
+      const shipping = shippingDetails.shippingCharge;
+      const taxable = Math.max((cartTotal || 0) - couponDiscountAmount, 0);
+      const gstRate = pricingSettings?.gstRate || 0;
+      const gst = Math.round(taxable * (gstRate / 100) * 100) / 100;
+      const total = Math.round((taxable + shipping + gst + customOrderFee) * 100) / 100;
+      return { subtotal: cartTotal || 0, shipping, gst, total, isTest: false };
+    }
+  }, [hasTestProduct, testItem, testProductSettings, cartTotal, couponDiscountAmount, shippingDetails.shippingCharge, pricingSettings?.gstRate, customOrderFee]);
+
+  const shipping = calculatedPricing.shipping;
+  const gst = calculatedPricing.gst;
+  const total = calculatedPricing.total;
+  const subtotal = calculatedPricing.subtotal;
+  const pricing = {
+    subtotal,
+    discountAmount: couponDiscountAmount,
+    shipping,
+    gstRate: hasTestProduct ? 0 : (pricingSettings?.gstRate || 0),
+    gstAmount: gst,
+    customOrderFee,
+    grandTotal: total,
+  };
+
   const CUSTOM_ADVANCE = 100;
-  const isCustom = customOrderEnabled && customOrder.quantity > 0;
   const advance = paymentMethod === 'cod' ? (isCustom ? CUSTOM_ADVANCE : 0) : total;
   const balance = Math.max(total - advance, 0);
 
@@ -497,6 +527,16 @@ const CheckoutView = () => {
   };
 
   const handlePlaceOrder = async () => {
+    if (delhiveryLoading && !hasTestProduct) {
+      setPopup({
+        title: 'Calculating delivery fee...',
+        message: 'Please wait, calculating delivery charge for your delivery location before placing the order.',
+        primaryLabel: 'OK',
+        onPrimary: () => setPopup(null),
+      });
+      return;
+    }
+
     if (!isLoggedIn) {
       setPopup({
         title: 'Login required',
@@ -577,6 +617,7 @@ const CheckoutView = () => {
       shippingCharge: pricing.shipping,
       gstRate: pricing.gstRate,
       gstAmount: pricing.gstAmount,
+      customOrderFee: pricing.customOrderFee || 0,
       grandTotal: pricing.grandTotal,
       total: pricing.grandTotal,
       paidAmount: 0,
@@ -961,7 +1002,7 @@ const CheckoutView = () => {
                   <>
                     <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-700">
                       <Wallet className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Shipping: {shippingDetails.countryCode !== 'IN' ? `₹${shipping.toFixed(2)} (estimated table rate)` : (shipping === 0 ? 'Free' : `₹${shipping.toFixed(2)}` + (delhiveryCharge ? ' (Delhivery rate)' : ' (fallback rate)'))}</span>
+                      <span>Shipping: {shippingDetails.countryCode !== 'IN' ? `₹${shipping.toFixed(2)} (estimated table rate)` : (shipping === 0 ? 'Free' : `₹${shipping.toFixed(2)}` + (hasTestProduct ? ' (Manual test rate)' : (delhiveryCharge ? ' (Delhivery rate)' : ' (fallback rate)')))}</span>
                     </div>
                     <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-700">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -987,9 +1028,24 @@ const CheckoutView = () => {
                 Order via WhatsApp
               </button>
             ) : (
-              <button onClick={handlePlaceOrder} className="mt-6 w-full btn-primary py-3 sm:py-4 text-sm sm:text-lg font-bold flex items-center justify-center gap-2">
-                <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
-                Place Order
+              <button
+                onClick={handlePlaceOrder}
+                disabled={delhiveryLoading && !hasTestProduct}
+                className={`mt-6 w-full btn-primary py-3 sm:py-4 text-sm sm:text-lg font-bold flex items-center justify-center gap-2 ${
+                  (delhiveryLoading && !hasTestProduct) ? 'opacity-60 cursor-not-allowed' : ''
+                }`}
+              >
+                {delhiveryLoading && !hasTestProduct ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Calculating delivery charge…</span>
+                  </>
+                ) : (
+                  <>
+                    <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
+                    <span>Place Order</span>
+                  </>
+                )}
               </button>
             )}
           </motion.div>
@@ -1005,7 +1061,7 @@ const CheckoutView = () => {
             <div className="space-y-3 mb-4 sm:mb-6">
               <div className="flex items-center justify-between">
                 <span className="text-gray-600 text-xs sm:text-sm">Subtotal</span>
-                <span className="font-semibold text-gray-800 text-xs sm:text-sm">₹{cartTotal.toFixed(2)}</span>
+                <span className="font-semibold text-gray-800 text-xs sm:text-sm">₹{subtotal.toFixed(2)}</span>
               </div>
               {couponDiscountAmount > 0 && (
                 <div className="flex items-center justify-between text-emerald-600">
@@ -1016,6 +1072,12 @@ const CheckoutView = () => {
                   <span className="font-bold text-xs sm:text-sm">-₹{couponDiscountAmount.toFixed(2)}</span>
                 </div>
               )}
+              {isCustom && (
+                <div className="flex items-center justify-between text-emerald-700 bg-emerald-50/60 p-2 rounded-lg border border-emerald-200">
+                  <span className="font-semibold text-xs sm:text-sm">Customization Charge</span>
+                  <span className="font-bold text-xs sm:text-sm">+₹100.00</span>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-gray-600 text-xs sm:text-sm">Shipping</span>
                 <span className="font-semibold text-gray-800 text-xs sm:text-sm">
@@ -1023,10 +1085,12 @@ const CheckoutView = () => {
                 </span>
               </div>
               <div className="text-[10px] text-gray-400 text-right">
-                {delhiveryCharge ? 'Delhivery rate' : 'Flat rate'} · est. {shippingDetails.estDelivery}
+                {hasTestProduct ? 'Manual Admin Test rate' : (delhiveryCharge ? 'Delhivery rate' : 'Flat rate')} · est. {shippingDetails.estDelivery}
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-gray-600 text-xs sm:text-sm">GST ({pricingSettings.gstRate}%)</span>
+                <span className="text-gray-600 text-xs sm:text-sm">
+                  GST {hasTestProduct ? '(Manual Test)' : `(${pricingSettings.gstRate}%)`}
+                </span>
                 <span className="font-semibold text-gray-800 text-xs sm:text-sm">₹{gst.toFixed(2)}</span>
               </div>
               <div className="border-t border-emerald-100 pt-3 flex items-center justify-between">
