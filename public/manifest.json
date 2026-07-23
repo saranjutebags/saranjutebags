@@ -1,0 +1,21 @@
+{
+  "short_name": "Saran Jute Bags",
+  "name": "Saran Jute Bags - Premium Jute Bags Manufacturer India",
+  "icons": [
+    {
+      "src": "/logo.webp",
+      "type": "image/webp",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/logo.webp",
+      "type": "image/webp",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#ecfdf5",
+  "theme_color": "#059669",
+  "display": "standalone",
+  "orientation": "portrait"
+}

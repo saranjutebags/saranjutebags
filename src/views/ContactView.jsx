@@ -1,24 +1,30 @@
 import { motion } from 'framer-motion';
 import { Mail, MapPin, Phone } from 'lucide-react';
+import SEOHead from '../components/SEOHead';
 
 const branches = [
   {
-    name: 'Mehdipatnam, Hyderabad',
-    address: '12-2-826/A/21, Priyanka College Lane, LIC Colony, Hyderabad, Telangana 500028',
+    name: 'Hyderabad',
+    address: import.meta.env.VITE_HYDERABAD_ADDRESS || 'Mehdipatnam, Hyderabad, Telangana',
   },
   {
     name: 'Secunderabad',
-    address: 'Shop No 1, 4-5, Mahatma Gandhi Rd, Nallagutta, Secunderabad, Telangana 500003',
+    address: import.meta.env.VITE_SECUNDERABAD_ADDRESS || 'Secunderabad, Telangana',
   },
   {
     name: 'Vijayawada',
-    address: '40-5-5/3, Sri Natrajan Guljar Rd, Brindavan Colony, Vijayawada, Andhra Pradesh 520010',
+    address: import.meta.env.VITE_VIJAYAWADA_ADDRESS || 'Vijayawada, Andhra Pradesh',
   },
 ];
 
 const ContactView = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
+      <SEOHead
+        title="Contact Us | Jute Bags Manufacturer Hyderabad, Secunderabad & Vijayawada"
+        description="Contact Saran Jute Bags in Mehdipatnam, Hyderabad, Secunderabad, Telangana & Vijayawada. Bulk orders, custom printed bags & corporate gifting inquiries."
+        canonical="/contact"
+      />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-12">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-100 text-emerald-700 font-semibold mb-4">
@@ -42,9 +48,9 @@ const ContactView = () => {
           <div className="glass rounded-3xl p-8 border border-emerald-100">
             <h2 className="text-2xl font-bold text-gray-800 mb-4">Contact Details</h2>
             <div className="space-y-4 text-gray-700">
-              <div className="flex items-center gap-3"><Phone className="w-5 h-5 text-emerald-600" /> +91 9866027027 / +91 9701000234</div>
-              <div className="flex items-center gap-3"><Mail className="w-5 h-5 text-emerald-600" /> saranjutebags@gmail.com</div>
-              <div className="flex items-center gap-3"><MapPin className="w-5 h-5 text-emerald-600" /> 12-2-420/14 Alapati Nagar Road, Gudi Malkapur, Mehdipatnam, Hyderabad, Telangana 500028</div>
+              <div className="flex items-center gap-3"><Phone className="w-5 h-5 text-emerald-600" /> {import.meta.env.VITE_PHONE_NUMBER || '+91 XXXXXXXXXX'}</div>
+              <div className="flex items-center gap-3"><Mail className="w-5 h-5 text-emerald-600" /> {import.meta.env.VITE_SUPPORT_EMAIL || 'support@saranjutebags.in'}</div>
+              <div className="flex items-center gap-3"><MapPin className="w-5 h-5 text-emerald-600" /> {import.meta.env.VITE_HYDERABAD_ADDRESS || 'Mehdipatnam, Hyderabad, Telangana'}</div>
             </div>
           </div>
 

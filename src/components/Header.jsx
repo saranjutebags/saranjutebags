@@ -27,7 +27,7 @@ const Header = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const { user, userData, signOut } = useAuth();
-  const { companySettings, scrollingTexts } = useAdmin();
+  const { companySettings } = useAdmin();
   const { cartCount } = useCart();
   const navigate = useNavigate();
 
@@ -55,19 +55,7 @@ const Header = () => {
       animate={{ y: 0 }}
       className="fixed top-0 left-0 right-0 z-40 glass shadow-lg"
     >
-      {/* Scrolling Announcement Bar */}
-      {scrollingTexts && scrollingTexts.filter(t => t.active).length > 0 && (
-        <div className="relative w-screen" style={{ marginLeft: 'calc(-50vw + 50%)', marginRight: 'calc(-50vw + 50%)' }}>
-          <div className="bg-gradient-to-r from-emerald-600 to-green-600 text-white text-[11px] sm:text-xs font-medium overflow-hidden h-7 sm:h-8 flex items-center">
-            <div className="marquee-track flex gap-12 whitespace-nowrap animate-marquee">
-              {[...Array(3)].flatMap(() => scrollingTexts.filter(t => t.active)).map((t, i) => (
-                <span key={`${t.id}-${i}`} className="px-4">{t.text}</span>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-      <div className={scrollingTexts && scrollingTexts.filter(t => t.active).length > 0 ? 'max-w-7xl mx-auto px-3 sm:px-4 lg:px-8' : 'max-w-7xl mx-auto px-3 sm:px-4 lg:px-8'}>
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
         <div className="flex items-center justify-between h-16 sm:h-20">
           {/* Logo */}
           <Link to="/" className="flex items-center space-x-2 hover:scale-105 transition-transform min-w-0 shrink-0">

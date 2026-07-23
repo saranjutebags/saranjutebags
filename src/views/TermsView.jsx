@@ -1,9 +1,15 @@
 import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
+import SEOHead from '../components/SEOHead';
 
 const TermsView = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
+      <SEOHead
+        title="Terms of Service | Saran Jute Bags"
+        description="Terms of Service for Saran Jute Bags. Understand our policies on orders, custom bags, returns, and payments for eco-friendly jute bag purchases."
+        canonical="/terms"
+      />
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         <Link to="/" className="inline-flex items-center gap-2 text-emerald-600 hover:text-emerald-700 font-medium mb-6">
           <ArrowLeft className="w-4 h-4" /> Back to Home

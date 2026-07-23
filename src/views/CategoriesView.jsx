@@ -2,6 +2,7 @@ import { motion } from 'framer-motion';
 import { ArrowRight, Package, Tags, ShoppingBag } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useProducts } from '../contexts/ProductContext';
+import SEOHead from '../components/SEOHead';
 
 const CategoriesView = () => {
   const { categories, products, loading } = useProducts();
@@ -17,6 +18,11 @@ const CategoriesView = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
+      <SEOHead
+        title="Jute Bags Categories & Collections | Wholesale Jute Bag Manufacturer"
+        description="Browse all Jute Bag categories: Customized Bags, Shopping Tote Bags, Corporate Gift Bags, Grocery Bags & Reusable Eco Bags. Manufacturer prices in Hyderabad, Telangana."
+        canonical="/categories"
+      />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
         {/* ── Heading ── */}

@@ -17,7 +17,6 @@ build/
 .env.development
 .env.production
 .env.test
-.env.*
 
 # ==========================
 # Logs
@@ -76,3 +75,5 @@ firebase-service-account.json
 *.temp
 *.swp
 *.swo
+*.ENV_SETUP.md
+*.env_SETUP.md

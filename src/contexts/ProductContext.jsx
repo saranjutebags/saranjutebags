@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { db, isFirebaseActive } from '../firebase/config';
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { useAdmin } from './AdminContext';
+import { slugify } from '../utils/slugify';
 
 const ProductContext = createContext();
 
@@ -121,6 +122,10 @@ export const ProductProvider = ({ children }) => {
   }, [products, testProductObject]);
 
   const getProductById = (id) => allProducts.find((product) => String(product.id) === String(id));
+  // Find product by URL slug (name-based) — fallback to ID match for backward compat
+  const getProductBySlug = (slug) =>
+    allProducts.find((p) => slugify(p.name) === slug) ||
+    allProducts.find((p) => String(p.id) === String(slug));
   const getFeaturedProducts = () => allProducts.filter((product) => product.featured && product.visible && !product.archived);
   const getBestsellers = () => allProducts.filter((product) => product.bestseller && product.visible && !product.archived);
   const getNewArrivals = () => allProducts.filter((product) => product.newArrival && product.visible && !product.archived);
@@ -275,29 +280,38 @@ export const ProductProvider = ({ children }) => {
     }
   };
 
-  const addReview = (productId, reviewData) => {
-    const product = products.find(p => String(p.id) === String(productId));
-    if (product) {
-      const newReview = {
-        id: Date.now(),
-        name: reviewData.name || 'Anonymous',
-        rating: reviewData.rating,
-        text: reviewData.text,
-        images: reviewData.images || [],
-        hidden: false,
-        date: new Date().toLocaleDateString()
-      };
+  const addReview = async (productId, reviewData) => {
+    const product = allProducts.find(p => String(p.id) === String(productId));
+    if (!product) return;
 
-      const updatedReviews = [...(product.customerReviews || []), newReview];
-      const avgRating = updatedReviews.reduce((sum, r) => sum + r.rating, 0) / updatedReviews.length;
-      const reviewCount = (product.reviews || 0) + 1;
+    // Strip base64 review images that are too large for Firestore (1MB doc limit)
+    const safeImages = (reviewData.images || []).filter(img => {
+      if (typeof img === 'string' && img.startsWith('data:') && img.length > 300000) {
+        console.warn('[Review] Dropping oversized image from review');
+        return false;
+      }
+      return true;
+    });
 
-      updateProduct(productId, {
-        customerReviews: updatedReviews,
-        rating: avgRating,
-        reviews: reviewCount
-      });
-    }
+    const newReview = {
+      id: Date.now(),
+      name: reviewData.name || 'Anonymous',
+      rating: reviewData.rating,
+      text: reviewData.text,
+      images: safeImages,
+      hidden: false,
+      date: new Date().toLocaleDateString()
+    };
+
+    const updatedReviews = [...(product.customerReviews || []), newReview];
+    const avgRating = updatedReviews.reduce((sum, r) => sum + r.rating, 0) / updatedReviews.length;
+    const reviewCount = (product.reviews || 0) + 1;
+
+    await updateProduct(product.id, {
+      customerReviews: updatedReviews,
+      rating: avgRating,
+      reviews: reviewCount
+    });
   };
 
   const deleteProductReview = (productId, reviewId) => {
@@ -333,6 +347,7 @@ export const ProductProvider = ({ children }) => {
     inventoryHistory,
     loading,
     getProductById,
+    getProductBySlug,
     getFeaturedProducts,
     getBestsellers,
     getNewArrivals,

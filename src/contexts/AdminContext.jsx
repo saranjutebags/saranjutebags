@@ -54,11 +54,11 @@ const defaultCompanySettings = {
   primaryColor: '#059669',
   secondaryColor: '#10b981',
   surfaceColor: '#ecfdf5',
-  addressLine1: 'Industrial Area, Hyderabad',
-  cityStatePin: 'Telangana - 500001',
-  gstin: '36ABCDE1234F1Z5',
-  pan: 'ABCDE1234F',
-  phone: '+91 9876543210',
+  addressLine1: '',
+  cityStatePin: '',
+  gstin: '',
+  pan: '',
+  phone: '',
   email: 'sales@saranjutebags.co.in',
   invoicePrefix: 'INV',
   website: 'https://saranjutebags.co.in',
@@ -76,48 +76,9 @@ const defaultHomepage = {
   footerText: 'Saran Jute Bags. Sustainable packaging that feels premium.',
 };
 
-const defaultPopups = [
-  {
-    id: 'popup-1',
-    title: 'Festival Offer',
-    subtitle: 'Limited time discount',
-    description: 'Use WELCOME10 for your first order.',
-    image: '/slide.webp',
-    buttonText: 'Shop Offer',
-    buttonLink: '/products',
-    couponCode: 'WELCOME10',
-    startDate: '',
-    endDate: '',
-    priority: 1,
-    autoCloseTimer: 0,
-    showOnce: true,
-    closeButton: true,
-    active: false,
-  },
-];
+const defaultPopups = [];
 
-const defaultBanners = [
-  {
-    id: 'banner-1',
-    title: 'Desktop Hero Banner',
-    image: '/splash_landscape.png',
-    type: 'Desktop Banner',
-    animation: 'Fade',
-    startDate: '',
-    endDate: '',
-    active: true,
-  },
-  {
-    id: 'banner-2',
-    title: 'Mobile Hero Banner',
-    image: '/splash_potrait.png',
-    type: 'Mobile Banner',
-    animation: 'Slide',
-    startDate: '',
-    endDate: '',
-    active: true,
-  },
-];
+const defaultBanners = [];
 
 const defaultReviews = [
   { id: 'rev-1', customer: 'Asha', rating: 5, text: 'Great quality and quick support.', status: 'Approved', featured: true, reply: 'Thank you!' },

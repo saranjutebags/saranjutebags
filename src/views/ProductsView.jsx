@@ -4,6 +4,8 @@ import { ShoppingBag, Heart, Star, Search, Package } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useProducts } from '../contexts/ProductContext';
 import { useCart } from '../contexts/CartContext';
+import SEOHead from '../components/SEOHead';
+import { slugify } from '../utils/slugify';
 
 const ProductsView = () => {
   const { products, categories, loading } = useProducts();
@@ -39,6 +41,11 @@ const ProductsView = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
+      <SEOHead
+        title="Wholesale Jute Bags & Custom Printed Bags | Products Catalog"
+        description="Explore our eco-friendly jute bags collection: corporate gift bags, tote bags, lunch bags, promotional bags & bulk jute bags. Direct manufacturer wholesale prices in India, Hyderabad & Telangana."
+        canonical="/products"
+      />
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
 
         {/* ── Heading ── */}
@@ -147,7 +154,7 @@ const ProductsView = () => {
               >
                 {/* Image */}
                 <div className="relative">
-                  <Link to={`/product/${product.id}`} className="block">
+                  <Link to={`/product/${slugify(product.name)}`} className="block">
                     <div className="h-48 sm:h-52 bg-gradient-to-br from-emerald-50 to-mint-50 flex items-center justify-center p-3">
                       {product.images?.[0] ? (
                         <img src={product.images[0]} alt={product.name} className="h-full w-full object-contain" />
@@ -181,7 +188,7 @@ const ProductsView = () => {
                   <span className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">
                     {product.category}
                   </span>
-                  <Link to={`/product/${product.id}`}>
+                  <Link to={`/product/${slugify(product.name)}`}>
                     <h3 className="font-bold text-gray-800 text-sm sm:text-base mt-1 mb-2 line-clamp-2 hover:text-emerald-600 transition-colors leading-snug">
                       {product.name}
                     </h3>
@@ -225,7 +232,7 @@ const ProductsView = () => {
                       <span className="truncate">{product.stock !== undefined && product.stock <= 0 ? 'Out of Stock' : 'Add to Cart'}</span>
                     </button>
                     <button
-                      onClick={() => navigate(`/product/${product.id}`)}
+                      onClick={() => navigate(`/product/${slugify(product.name)}`)}
                       className="btn-secondary px-2 sm:px-3 py-2 sm:py-2.5 text-[11px] sm:text-sm font-semibold shrink-0 whitespace-nowrap"
                     >
                       View

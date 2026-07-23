@@ -592,11 +592,18 @@ const AdminDashboard = () => {
     setLoading(true);
     try {
       const id = editingPopup?.id || `popup-${Date.now()}`;
-      const popupData = { ...popupForm, id };
-      
+      // Strip base64 images that are too large for Firestore (1MB doc limit)
+      let imageValue = popupForm.image || '';
+      if (imageValue.startsWith('data:') && imageValue.length > 500000) {
+        showMessage('Image is too large. Please use an image URL instead of uploading a file.', 'error');
+        setLoading(false);
+        return;
+      }
+      const popupData = { ...popupForm, image: imageValue, id };
+
       await setDoc(doc(db, 'popups', id), popupData);
       showMessage(editingPopup ? 'Popup updated successfully' : 'Popup added successfully');
-      
+
       setEditingPopup(null);
       setPopupForm({
         title: '',
@@ -610,7 +617,8 @@ const AdminDashboard = () => {
         active: true,
       });
     } catch (error) {
-      showMessage('Failed to save popup', 'error');
+      console.error('Popup save error:', error);
+      showMessage(`Failed to save popup: ${error.message || 'Unknown error'}`, 'error');
     } finally {
       setLoading(false);
     }

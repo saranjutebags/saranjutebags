@@ -6,12 +6,13 @@ import { useProducts } from '../contexts/ProductContext';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
 import { convertFileToBase64 } from '../utils/imageUtils';
+import SEOHead from '../components/SEOHead';
 
 const ProductView = () => {
-  const { id } = useParams();
+  const { slug } = useParams();
   const location = useLocation();
   const productUrl = `${window.location.origin}${location.pathname}`;
-  const { getProductById, addReview } = useProducts();
+  const { getProductBySlug, addReview } = useProducts();
   const { addToCart, toggleWishlist, isInWishlist } = useCart();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -31,7 +32,7 @@ const ProductView = () => {
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [copied, setCopied] = useState(false);
   
-  const product = getProductById(id);
+  const product = getProductBySlug(slug);
 
   const handleAddToCart = () => {
     if (!user) {
@@ -44,12 +45,12 @@ const ProductView = () => {
     );
   };
 
-  const handleAddReview = () => {
+  const handleAddReview = async () => {
     if (newReview.rating === 0 || !newReview.text.trim()) {
       alert('Please select a rating and write a review');
       return;
     }
-    addReview(Number(id), {
+    await addReview(product.id, {
       name: newReview.name || (user ? user.displayName || user.email : 'Anonymous'),
       rating: newReview.rating,
       text: newReview.text,
@@ -130,6 +131,38 @@ const ProductView = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
+      {product && (
+        <SEOHead
+          title={`${product.name} - Wholesale Jute Bag Manufacturer`}
+          description={`${product.name} by Saran Jute Bags. ${product.description ? product.description.slice(0, 140) : 'Premium eco-friendly jute bag available for wholesale & bulk orders in India, Hyderabad & Telangana.'}`}
+          canonical={`/product/${product.id}`}
+          ogType="product"
+          ogImage={product.images?.[0] || product.image}
+          schema={{
+            '@context': 'https://schema.org',
+            '@type': 'Product',
+            'name': product.name,
+            'image': product.images || [product.image],
+            'description': product.description || `Buy ${product.name} at wholesale prices. Eco-friendly jute bag manufacturer in Hyderabad, India.`,
+            'sku': String(product.sku || product.id),
+            'brand': {
+              '@type': 'Brand',
+              'name': 'Saran Jute Bags',
+            },
+            'offers': {
+              '@type': 'Offer',
+              'url': `https://saranjutebags.co.in/product/${product.id}`,
+              'priceCurrency': 'INR',
+              'price': product.price,
+              'availability': (product.stock ?? 1) > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+              'seller': {
+                '@type': 'Organization',
+                'name': 'Saran Jute Bags',
+              },
+            },
+          }}
+        />
+      )}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <button
           onClick={() => navigate(-1)}

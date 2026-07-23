@@ -1,32 +1,46 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AdminProvider, useAdmin } from './contexts/AdminContext';
 import { ProductProvider } from './contexts/ProductContext';
 import { CartProvider } from './contexts/CartContext';
 import Header from './components/Header';
-import SplashScreen from './components/SplashScreen';
+import ScrollToTop from './components/ScrollToTop';
+import CartToast from './components/CartToast';
+import HelpFloatButton from './components/HelpFloatButton';
+
+// Eagerly-loaded small views
 import LandingView from './views/LandingView';
 import AuthView from './views/AuthView';
-import DashboardView from './views/DashboardView';
-import AdminDashboard from './views/AdminDashboard';
 import ProductsView from './views/ProductsView';
-import ProductView from './views/ProductView';
-import CartView from './views/CartView';
-import CheckoutView from './views/CheckoutView';
-import ProfileView from './views/ProfileView';
-import OrdersView from './views/OrdersView';
-import OrderDoneView from './views/OrderDoneView';
-import OrderInfoView from './views/OrderInfoView';
 import CategoriesView from './views/CategoriesView';
 import AboutView from './views/AboutView';
 import ContactView from './views/ContactView';
-import WishlistView from './views/WishlistView';
 import PrivacyView from './views/PrivacyView';
 import TermsView from './views/TermsView';
-import CartToast from './components/CartToast';
-import HelpFloatButton from './components/HelpFloatButton';
-import CouponPopup from './components/CouponPopup';
+import CartView from './views/CartView';
+import WishlistView from './views/WishlistView';
+
+// Lazy-loaded heavy views — loaded only when the user navigates to them
+const SplashScreen = lazy(() => import('./components/SplashScreen'));
+const ProductView = lazy(() => import('./views/ProductView'));
+const CheckoutView = lazy(() => import('./views/CheckoutView'));
+const ProfileView = lazy(() => import('./views/ProfileView'));
+const OrdersView = lazy(() => import('./views/OrdersView'));
+const OrderDoneView = lazy(() => import('./views/OrderDoneView'));
+const OrderInfoView = lazy(() => import('./views/OrderInfoView'));
+const AdminDashboard = lazy(() => import('./views/AdminDashboard'));
+const DashboardView = lazy(() => import('./views/DashboardView'));
+
+// Minimal fallback while heavy views load
+const PageLoader = () => (
+  <div className="min-h-screen flex items-center justify-center bg-white">
+    <div className="flex flex-col items-center gap-3">
+      <div className="w-10 h-10 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
+      <span className="text-emerald-600 font-medium text-sm">Loading…</span>
+    </div>
+  </div>
+);
 
 const allowedAdminRoles = new Set(['admin', 'super admin', 'manager', 'inventory manager', 'order manager', 'customer support']);
 
@@ -79,39 +93,41 @@ const AppShell = () => {
       <Header />
       <CartToast />
       <HelpFloatButton />
-      <CouponPopup />
-      <Routes>
-        <Route path="/" element={<LandingView />} />
-        <Route path="/auth" element={<AuthView />} />
-        <Route path="/dashboard" element={<ProtectedAdminRoute><AdminDashboard /></ProtectedAdminRoute>} />
-        <Route path="/admin-old" element={<ProtectedAdminRoute><DashboardView /></ProtectedAdminRoute>} />
-        <Route path="/products" element={<ProductsView />} />
-        <Route path="/product/:id" element={<ProductView />} />
-        <Route path="/cart" element={<CartView />} />
-        <Route path="/checkout" element={<CheckoutView />} />
-        <Route path="/profile" element={<ProfileView />} />
-        <Route path="/orders" element={<OrdersView />} />
-        <Route path="/orders/:id" element={<OrderInfoView />} />
-        <Route path="/order-done" element={<OrderDoneView />} />
-        <Route path="/wishlist" element={<WishlistView />} />
-        <Route path="/categories" element={<CategoriesView />} />
-        <Route path="/about" element={<AboutView />} />
-        <Route path="/contact" element={<ContactView />} />
-        <Route path="/privacy" element={<PrivacyView />} />
-        <Route path="/terms" element={<TermsView />} />
+      <ScrollToTop />
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/" element={<LandingView />} />
+          <Route path="/auth" element={<AuthView />} />
+          <Route path="/dashboard" element={<ProtectedAdminRoute><AdminDashboard /></ProtectedAdminRoute>} />
+          <Route path="/admin-old" element={<ProtectedAdminRoute><DashboardView /></ProtectedAdminRoute>} />
+          <Route path="/products" element={<ProductsView />} />
+          {/* Slug-based product URL (shareable by name) */}
+          <Route path="/product/:slug" element={<ProductView />} />
+          <Route path="/cart" element={<CartView />} />
+          <Route path="/checkout" element={<CheckoutView />} />
+          <Route path="/profile" element={<ProfileView />} />
+          <Route path="/orders" element={<OrdersView />} />
+          <Route path="/orders/:id" element={<OrderInfoView />} />
+          <Route path="/order-done" element={<OrderDoneView />} />
+          <Route path="/wishlist" element={<WishlistView />} />
+          <Route path="/categories" element={<CategoriesView />} />
+          <Route path="/about" element={<AboutView />} />
+          <Route path="/contact" element={<ContactView />} />
+          <Route path="/privacy" element={<PrivacyView />} />
+          <Route path="/terms" element={<TermsView />} />
         </Routes>
+      </Suspense>
     </div>
   );
 };
 
 function App() {
-  const [showSplash, setShowSplash] = useState(false); // Disabled splash screen temporarily
+  const [showSplash, setShowSplash] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       setShowSplash(false);
     }, 3000);
-
     return () => clearTimeout(timer);
   }, []);
 
@@ -120,7 +136,11 @@ function App() {
   };
 
   if (showSplash) {
-    return <SplashScreen onComplete={handleSplashComplete} />;
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <SplashScreen onComplete={handleSplashComplete} />
+      </Suspense>
+    );
   }
 
   return (

@@ -8,6 +8,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useProducts } from '../contexts/ProductContext';
 import { useCart } from '../contexts/CartContext';
 import HomeSlideshow from '../components/HomeSlideshow';
+import SEOHead from '../components/SEOHead';
+import { slugify } from '../utils/slugify';
 
 const branches = [
   {
@@ -24,12 +26,12 @@ const branches = [
 ];
 
 const whyChooseUs = [
-  { icon: Leaf,   title: '100% Eco-Friendly',    desc: 'Biodegradable and sustainable materials' },
-  { icon: Truck,  title: 'Fast Delivery',         desc: 'Worldwide shipping available' },
-  { icon: Shield, title: 'Premium Quality',       desc: 'High-grade laminated jute' },
-  { icon: Globe,  title: 'Custom Branding',       desc: 'Personalize with your logo' },
-  { icon: Award,  title: '14+ Years Experience',  desc: 'Trusted by thousands' },
-  { icon: Zap,    title: 'Bulk Orders',           desc: 'Corporate gifting solutions' },
+  { icon: Leaf, title: '100% Eco-Friendly', desc: 'Biodegradable and sustainable materials' },
+  { icon: Truck, title: 'Fast Delivery', desc: 'Worldwide shipping available' },
+  { icon: Shield, title: 'Premium Quality', desc: 'High-grade laminated jute' },
+  { icon: Globe, title: 'Custom Branding', desc: 'Personalize with your logo' },
+  { icon: Award, title: '14+ Years Experience', desc: 'Trusted by thousands' },
+  { icon: Zap, title: 'Bulk Orders', desc: 'Corporate gifting solutions' },
 ];
 
 const LandingView = () => {
@@ -59,7 +61,7 @@ const LandingView = () => {
             })
             .catch(() => setLocationName(''));
         },
-        () => {},
+        () => { },
         { timeout: 5000, enableHighAccuracy: true }
       );
     }
@@ -70,7 +72,12 @@ const LandingView = () => {
   const visibleCategories = categories.filter(c => c.visible !== false);
 
   return (
-    <div className="pt-32 sm:pt-36">
+    <div className="min-h-screen">
+      <SEOHead
+        title="Jute Bags Manufacturer India | Wholesale Jute Bags Hyderabad & Telangana"
+        description="Best Jute Bags Manufacturer & Wholesale Supplier in India, Hyderabad, Telangana & Vijayawada. Custom printed eco-friendly jute bags, corporate gift bags, tote bags, lunch bags & reusable shopping bags at factory prices."
+        canonical="/"
+      />
 
       {/* ── Hero ──────────────────────────────────────────────────── */}
       <section className="relative min-h-[90vh] flex items-center overflow-hidden">
@@ -241,7 +248,7 @@ const LandingView = () => {
                     className="glass rounded-2xl overflow-hidden shadow-lg border border-emerald-100"
                   >
                     <div className="relative h-52 bg-gradient-to-br from-emerald-50 to-mint-50 flex items-center justify-center p-4">
-                      <Link to={`/product/${product.id}`} className="block w-full h-full flex items-center justify-center">
+                      <Link to={`/product/${slugify(product.name)}`} className="block w-full h-full flex items-center justify-center">
                         {product.images?.[0] ? (
                           <img src={product.images[0]} alt={product.name} className="h-full w-full object-contain" />
                         ) : (
@@ -258,7 +265,7 @@ const LandingView = () => {
                       </button>
                     </div>
                     <div className="p-4">
-                      <Link to={`/product/${product.id}`}>
+                      <Link to={`/product/${slugify(product.name)}`}>
                         <h3 className="font-semibold text-gray-800 mb-1 line-clamp-2 hover:text-emerald-600 transition-colors text-sm">{product.name}</h3>
                       </Link>
                       <div className="flex items-center gap-1 mb-3">
@@ -443,7 +450,7 @@ const LandingView = () => {
             <div>
               <h4 className="font-bold mb-4">Contact</h4>
               <ul className="space-y-3 text-sm">
-                <li className="flex items-start gap-2 text-gray-400"><MapPin className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" /><span>12-2-420/14 Alapati Nagar Road, Gudi Malkapur, Mehdipatnam, Hyderabad, Telangana 500028</span></li>
+                <li className="flex items-start gap-2 text-gray-400"><MapPin className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" /><span>12-2-420/4 Alapati Nagar, GudiMalkapur, Mehdipatnam, Hyderabad, Telangana 500028</span></li>
                 <li className="flex items-center gap-2 text-gray-400"><Phone className="w-4 h-4 text-emerald-500 shrink-0" /><span>+91 9866027027 / +91 9701000234</span></li>
                 <li className="flex items-center gap-2 text-gray-400"><Mail className="w-4 h-4 text-emerald-500 shrink-0" /><span>saranjutebags@gmail.com</span></li>
               </ul>

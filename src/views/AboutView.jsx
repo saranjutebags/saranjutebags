@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { Award, Globe, Leaf, Shield, Truck } from 'lucide-react';
+import SEOHead from '../components/SEOHead';
 
 const stats = [
   { number: '14+', label: 'Years Experience' },
@@ -11,6 +12,11 @@ const stats = [
 const AboutView = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
+      <SEOHead
+        title="About Us | Leading Jute Bags Manufacturer India & Hyderabad"
+        description="Established 2010, Saran Jute Bags is a premier eco-friendly jute bags manufacturer, exporter & supplier in Hyderabad, Telangana & Vijayawada. 14+ years of excellence."
+        canonical="/about"
+      />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-12">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-100 text-emerald-700 font-semibold mb-4">

@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /admin-old
+Disallow: /checkout
+Disallow: /profile
+Disallow: /orders
+Disallow: /auth
+
+Sitemap: https://saranjutebags.in/sitemap.xml

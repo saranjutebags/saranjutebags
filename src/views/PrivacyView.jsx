@@ -1,9 +1,15 @@
 import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
+import SEOHead from '../components/SEOHead';
 
 const PrivacyView = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
+      <SEOHead
+        title="Privacy Policy | Saran Jute Bags"
+        description="Privacy policy of Saran Jute Bags. Learn how we collect, store, protect, and use your personal information safely."
+        canonical="/privacy"
+      />
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         <Link to="/" className="inline-flex items-center gap-2 text-emerald-600 hover:text-emerald-700 font-medium mb-6">
           <ArrowLeft className="w-4 h-4" /> Back to Home
