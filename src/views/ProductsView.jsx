@@ -176,9 +176,9 @@ const ProductsView = () => {
                       -{product.discountPercentage}%
                     </span>
                   )}
-                  {product.stock !== undefined && product.stock <= 5 && (
-                    <span className={`absolute top-3 ${product.discountPercentage > 0 ? 'right-3' : 'right-3'} ${product.stock <= 0 ? 'bg-red-500' : 'bg-amber-500'} text-white text-[10px] font-bold px-2 py-1 rounded-full`}>
-                      {product.stock <= 0 ? 'Out of Stock' : `Only ${product.stock} left`}
+                  {product.inStock === false && (
+                    <span className="absolute top-3 right-3 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full">
+                      Out of Stock
                     </span>
                   )}
                 </div>
@@ -225,11 +225,11 @@ const ProductsView = () => {
                   <div className="flex gap-1.5 sm:gap-2">
                     <button
                       onClick={() => addToCart(product)}
-                      disabled={product.stock !== undefined && product.stock <= 0}
-                      className={`flex-1 py-2 sm:py-2.5 flex items-center justify-center gap-1 sm:gap-1.5 text-[11px] sm:text-sm font-semibold whitespace-nowrap min-w-0 ${product.stock !== undefined && product.stock <= 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed rounded-xl' : 'btn-primary'}`}
+                      disabled={product.inStock === false}
+                      className={`flex-1 py-2 sm:py-2.5 flex items-center justify-center gap-1 sm:gap-1.5 text-[11px] sm:text-sm font-semibold whitespace-nowrap min-w-0 ${product.inStock === false ? 'bg-gray-300 text-gray-500 cursor-not-allowed rounded-xl' : 'btn-primary'}`}
                     >
                       <ShoppingBag className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-                      <span className="truncate">{product.stock !== undefined && product.stock <= 0 ? 'Out of Stock' : 'Add to Cart'}</span>
+                      <span className="truncate">{product.inStock === false ? 'Out of Stock' : 'Add to Cart'}</span>
                     </button>
                     <button
                       onClick={() => navigate(`/product/${slugify(product.name)}`)}

@@ -48,7 +48,12 @@ import {
   History,
   Copy,
   CheckCircle2,
+  Printer,
+  ReceiptText,
+  Table2,
 } from 'lucide-react';
+import BillGenerator from '../components/BillGenerator';
+import OfflineBillsSheet from '../components/OfflineBillsSheet';
 
 const AdminDashboard = () => {
   const { user, signOut } = useAuth();
@@ -78,15 +83,23 @@ const AdminDashboard = () => {
     discountType: 'percentage',
     showDiscount: false,
     material: '',
-    stock: '',
+    stock: 0,
+    inStock: true,
+    weightPerPiece: '',
     category: '',
     description: '',
     images: '',
     sku: '',
     featured: false,
     archived: false,
+    dimensions: { length: '', width: '', height: '', unit: 'cm' },
+    styles: [],
+    customDesignFee: 100,
   });
   const [productImages, setProductImages] = useState([]);
+  
+  // Image modal state
+  const [imageModal, setImageModal] = useState({ isOpen: false, src: '', alt: '' });
 
   // All orders from top-level collection (admin view) — starts empty, populated only by Firestore
   const [allOrders, setAllOrders] = useState([]);
@@ -207,6 +220,8 @@ const AdminDashboard = () => {
     { id: 'categories', label: 'Categories', icon: Tags },
     { id: 'products', label: 'Products', icon: Package },
     { id: 'orders', label: 'Orders', icon: ShoppingCart },
+    { id: 'bills', label: 'New Bill', icon: ReceiptText },
+    { id: 'offlineSales', label: 'Offline Sales', icon: Table2 },
     { id: 'reviews', label: 'Reviews', icon: Star },
     { id: 'customers', label: 'Customers', icon: Users },
     { id: 'activity', label: 'Activity', icon: History },
@@ -414,7 +429,8 @@ const AdminDashboard = () => {
       discountType: product.discountType || 'percentage',
       showDiscount: product.showDiscount !== undefined ? product.showDiscount : Boolean(product.originalPrice),
       material: product.material || '',
-      stock: product.stock || '',
+      stock: product.stock || 0,
+      inStock: product.inStock !== false && (product.stock || 0) > 0,
       weightPerPiece: product.weightPerPiece || '',
       category: product.category || '',
       description: product.description || '',
@@ -422,6 +438,8 @@ const AdminDashboard = () => {
       sku: product.sku || '',
       featured: product.featured || false,
       archived: product.archived || false,
+      dimensions: product.dimensions || { length: '', width: '', height: '', unit: 'cm' },
+      styles: product.styles || [],
     });
   };
 
@@ -1027,18 +1045,18 @@ const AdminDashboard = () => {
           </div>
         </Card>
 
-        <Card title="Low Stock Products">
+        <Card title="Out of Stock Products">
           <div className="space-y-3">
-            {products.filter(p => p.stock <= 5).map(product => (
+            {products.filter(p => p.inStock === false).map(product => (
               <div key={product.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                 <div>
                   <p className="font-medium">{product.name}</p>
                   <p className="text-sm text-gray-500">SKU: {product.sku}</p>
                 </div>
-                <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm">{product.stock} left</span>
+                <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm">Out of Stock</span>
               </div>
             ))}
-            {products.filter(p => p.stock <= 5).length === 0 && <p className="text-gray-500 text-center py-4">All products in stock</p>}
+            {products.filter(p => p.inStock === false).length === 0 && <p className="text-gray-500 text-center py-4">All products in stock</p>}
           </div>
         </Card>
       </div>
@@ -1132,13 +1150,31 @@ const AdminDashboard = () => {
               placeholder="Enter final selling price"
             />
           )}
-          <Input
-            label="Stock"
-            type="number"
-            value={productForm.stock}
-            onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })}
-            placeholder="Enter stock quantity"
-          />
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Stock Status</label>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="inStock"
+                  checked={productForm.inStock !== false}
+                  onChange={() => setProductForm({ ...productForm, inStock: true, stock: 999 })}
+                  className="w-4 h-4 text-emerald-600 border-gray-300 focus:ring-emerald-500"
+                />
+                <span className="text-sm font-medium text-gray-700">In Stock</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="inStock"
+                  checked={productForm.inStock === false}
+                  onChange={() => setProductForm({ ...productForm, inStock: false, stock: 0 })}
+                  className="w-4 h-4 text-red-600 border-gray-300 focus:ring-red-500"
+                />
+                <span className="text-sm font-medium text-gray-700">Out of Stock</span>
+              </label>
+            </div>
+          </div>
           <Input
             label="Weight per Piece (kg)"
             type="number"
@@ -1161,6 +1197,130 @@ const AdminDashboard = () => {
               <option value="Canvas">Canvas</option>
             </select>
           </div>
+
+          {/* Dimensions */}
+          <div className="space-y-4 md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700">Dimensions</label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-gray-600">Length</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={productForm.dimensions?.length || ''}
+                  onChange={(e) => setProductForm({ ...productForm, dimensions: { ...productForm.dimensions, length: e.target.value } })}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                  placeholder="Length"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-gray-600">Width</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={productForm.dimensions?.width || ''}
+                  onChange={(e) => setProductForm({ ...productForm, dimensions: { ...productForm.dimensions, width: e.target.value } })}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                  placeholder="Width"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-gray-600">Height</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={productForm.dimensions?.height || ''}
+                  onChange={(e) => setProductForm({ ...productForm, dimensions: { ...productForm.dimensions, height: e.target.value } })}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                  placeholder="Height"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-gray-600">Unit</label>
+                <select
+                  value={productForm.dimensions?.unit || 'cm'}
+                  onChange={(e) => setProductForm({ ...productForm, dimensions: { ...productForm.dimensions, unit: e.target.value } })}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="cm">cm</option>
+                  <option value="inch">inch</option>
+                  <option value="mm">mm</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Product Styles */}
+          <div className="space-y-4 md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700">Product Styles (for style selection on Add to Cart)</label>
+            <p className="text-xs text-gray-500">Add style variants that customers can select with quantities. Price = base price × number of selected styles.</p>
+            <div className="space-y-2">
+              {productForm.styles?.map((style, idx) => (
+                <div key={idx} className="flex flex-col sm:flex-row gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                  <input
+                    type="text"
+                    value={style.name || ''}
+                    onChange={(e) => {
+                      const styles = [...productForm.styles];
+                      styles[idx] = { ...styles[idx], name: e.target.value };
+                      setProductForm({ ...productForm, styles });
+                    }}
+                    placeholder="Style name (e.g., Red, Large, With Pocket)"
+                    className="flex-1 p-2 border border-gray-300 rounded-lg text-sm"
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    value={style.defaultQuantity || 1}
+                    onChange={(e) => {
+                      const styles = [...productForm.styles];
+                      styles[idx] = { ...styles[idx], defaultQuantity: parseInt(e.target.value) || 1 };
+                      setProductForm({ ...productForm, styles });
+                    }}
+                    className="w-24 p-2 border border-gray-300 rounded-lg text-sm"
+                    placeholder="Default Qty"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const styles = productForm.styles.filter((_, i) => i !== idx);
+                      setProductForm({ ...productForm, styles });
+                    }}
+                    className="w-20 p-2 text-red-600 hover:bg-red-50 rounded-lg text-sm font-medium"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => setProductForm({ ...productForm, styles: [...(productForm.styles || []), { name: '', defaultQuantity: 1 }] })}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 text-sm font-medium"
+              >
+                <Plus className="w-4 h-4" />
+                Add Style
+              </button>
+            </div>
+          </div>
+
+          {/* Custom Design Fee */}
+          <div className="space-y-1 md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700">Custom Design Fee (₹)</label>
+            <p className="text-xs text-gray-500">Additional charge when customer adds custom text/logo/design. Added once per order.</p>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={productForm.customDesignFee || 100}
+              onChange={(e) => setProductForm({ ...productForm, customDesignFee: Number(e.target.value) || 0 })}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+              placeholder="e.g., 100"
+            />
+          </div>
+
           <div className="flex gap-6 mt-2">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
@@ -1265,7 +1425,7 @@ const AdminDashboard = () => {
             <button
               onClick={() => {
                 setEditingProduct(null);
-                setProductForm({ name: '', price: '', stock: '', weightPerPiece: '', category: '', description: '', images: '', sku: '' });
+                setProductForm({ name: '', price: '', stock: 0, inStock: true, weightPerPiece: '', category: '', description: '', images: '', sku: '', dimensions: { length: '', width: '', height: '', unit: 'cm' }, styles: [] });
               }}
               className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
             >
@@ -1305,7 +1465,9 @@ const AdminDashboard = () => {
                   <td className="p-3">{product.sku}</td>
                   <td className="p-3">₹{product.price}</td>
                   <td className="p-3">
-                    <span className={product.stock <= 5 ? 'text-red-600 font-medium' : ''}>{product.stock}</span>
+                    <span className={product.inStock === false ? 'text-red-600 font-medium' : 'text-emerald-600 font-medium'}>
+                      {product.inStock === false ? 'Out of Stock' : 'In Stock'}
+                    </span>
                   </td>
                   <td className="p-3">{product.category}</td>
                   <td className="p-3">
@@ -3300,7 +3462,8 @@ const AdminDashboard = () => {
                           <img 
                             src={selectedOrder.customOrder.customImage} 
                             alt="Custom" 
-                            className="w-32 h-32 object-contain rounded-lg border border-emerald-200 bg-white" 
+                            className="w-32 h-32 object-contain rounded-lg border border-emerald-200 bg-white cursor-pointer hover:opacity-80 transition-opacity" 
+                            onClick={() => setImageModal({ isOpen: true, src: selectedOrder.customOrder.customImage, alt: 'Custom Order Image' })}
                           />
                           <button
                             onClick={() => {
@@ -3324,18 +3487,88 @@ const AdminDashboard = () => {
                 <div>
                   <h3 className="font-semibold text-lg mb-3">Ordered Items</h3>
                   <div className="space-y-3">
-                    {selectedOrder.items?.map((item, index) => (
-                      <div key={index} className="flex items-center gap-4 p-3 bg-gray-50 rounded-xl">
-                        {(item.selectedImage || item.images?.[0]) && (
-                          <img src={getItemImage(item, products)} alt={item.name} className="w-16 h-16 object-cover rounded-lg" onError={(e) => { e.target.style.display = 'none'; }} />
-                        )}
-                        <div className="flex-1">
-                          <p className="font-medium">{item.name}</p>
-                          <p className="text-sm text-gray-500">Qty: {item.quantity} × ₹{item.price}</p>
+                    {selectedOrder.items?.map((item, index) => {
+                      const hasStyles = item.selectedStyles && item.selectedStyles.length > 0;
+                      const totalQty = item.totalStyleQuantity || item.quantity;
+                      const itemTotal = item.price * totalQty;
+                      
+                      return (
+                        <div key={`${item.id}-${item.stylesKey || index}`} className="bg-gray-50 rounded-xl overflow-hidden">
+                          <div className="flex items-center gap-4 p-3">
+                            {(item.selectedImage || item.images?.[0]) && (
+                              <img src={getItemImage(item, products)} alt={item.name} className="w-16 h-16 object-cover rounded-lg" onError={(e) => { e.target.style.display = 'none'; }} />
+                            )}
+                            <div className="flex-1">
+                              <p className="font-medium">{item.name}</p>
+                              <p className="text-sm text-gray-500">
+                                {hasStyles ? `Total Qty: ${totalQty} (${item.selectedStyles.length} styles)` : `Qty: ${item.quantity}`} × ₹{item.price}
+                              </p>
+                            </div>
+                            <p className="font-semibold">₹{itemTotal}</p>
+                          </div>
+                          
+{hasStyles && (
+                              <div className="px-4 pb-3 pl-20 border-t border-gray-200 bg-white">
+                                <div className="space-y-2">
+                                  {item.selectedStyles.map((style, idx) => (
+                                    <div key={`${style.name}-${idx}`} className="flex items-center justify-between p-2 bg-emerald-50 rounded-lg border border-emerald-100 text-sm">
+                                      <div className="flex items-center gap-2">
+                                        <span className="w-5 h-5 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-[10px] font-bold">
+                                          {idx + 1}
+                                        </span>
+                                        <span className="font-medium text-gray-800">{style.name}</span>
+                                      </div>
+                                      <div className="flex items-center gap-4 text-gray-600">
+                                        <span>Qty: {style.quantity}</span>
+                                        <span>₹{style.price} each</span>
+                                        <span className="font-semibold text-emerald-700">₹{style.total}</span>
+                                      </div>
+                                    </div>
+                                  ))}
+
+                                  {/* Custom Design Details */}
+                                  {item.selectedStyles.filter(s => s.isCustomDesign).map((design, dIdx) => (
+                                    <div key={`custom-design-${dIdx}`} className="p-3 bg-emerald-50 rounded-lg border border-emerald-200 text-sm">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <span className="w-6 h-6 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-xs font-bold">🎨</span>
+                                        <span className="font-semibold text-emerald-800">Custom Design</span>
+                                      </div>
+                                      {design.customText && (
+                                        <p className="text-gray-700"><strong>Text:</strong> {design.customText}</p>
+                                      )}
+                                      {design.customLogo && (
+                                        <div className="flex items-center gap-3 mt-1">
+                                          <strong className="text-gray-700">Logo:</strong>
+                                          <img 
+                                            src={design.customLogo} 
+                                            alt="Custom Logo" 
+                                            className="w-16 h-16 object-contain rounded border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity" 
+                                            onClick={() => setImageModal({ isOpen: true, src: design.customLogo, alt: 'Custom Design Logo' })}
+                                          />
+                                          <button
+                                            onClick={() => {
+                                              const link = document.createElement('a');
+                                              link.href = design.customLogo;
+                                              link.download = `custom-design-logo-${item.name}-${Date.now()}.png`;
+                                              link.click();
+                                            }}
+                                            className="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700"
+                                          >
+                                            Download
+                                          </button>
+                                        </div>
+                                      )}
+                                      {design.customDescription && (
+                                        <p className="text-gray-700 mt-1"><strong>Details:</strong> {design.customDescription}</p>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                         </div>
-                        <p className="font-semibold">₹{item.price * item.quantity}</p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -3506,6 +3739,16 @@ const AdminDashboard = () => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Image Modal */}
+      {imageModal.isOpen && (
+        <ImageModal
+          isOpen={imageModal.isOpen}
+          src={imageModal.src}
+          alt={imageModal.alt}
+          onClose={() => setImageModal({ isOpen: false, src: '', alt: '' })}
+        />
+      )}
 
       {/* Delete Confirmation Modal */}
       <AnimatePresence>
@@ -3975,6 +4218,8 @@ const AdminDashboard = () => {
           {activeTab === 'categories' && renderCategories()}
           {activeTab === 'products' && renderProducts()}
           {activeTab === 'orders' && renderOrders()}
+          {activeTab === 'bills' && <BillGenerator showMessage={showMessage} />}
+          {activeTab === 'offlineSales' && <OfflineBillsSheet showMessage={showMessage} />}
           {activeTab === 'customers' && renderCustomers()}
           {activeTab === 'reviews' && renderReviews()}
           {activeTab === 'alerts' && renderAlerts()}
@@ -4008,6 +4253,60 @@ const StatCard = ({ label, value, icon: Icon, color, isNew = false }) => (
     )}
   </motion.div>
 );
+
+// Image Modal Component
+const ImageModal = ({ isOpen, src, alt, onClose }) => {
+  if (!isOpen || !src) return null;
+
+  const handlePrint = () => {
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Print Image</title>
+          <style>
+            body { margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+            img { max-width: 100%; max-height: 90vh; }
+            @media print { body { padding: 0; } }
+          </style>
+        </head>
+        <body>
+          <img src="${src}" alt="${alt}" />
+          <script>window.onload = () => window.print();</script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
+      <div className="relative max-w-4xl max-h-[90vh] bg-white rounded-xl overflow-hidden">
+        <div className="absolute top-3 right-3 z-10 flex gap-2">
+          <button
+            onClick={handlePrint}
+            className="p-2 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 transition-colors shadow-lg"
+            title="Print"
+          >
+            <Printer className="w-5 h-5" />
+          </button>
+          <button
+            onClick={onClose}
+            className="p-2 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors shadow-lg"
+            title="Close"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <img 
+          src={src} 
+          alt={alt} 
+          className="w-full h-auto max-h-[90vh] object-contain"
+        />
+      </div>
+    </div>
+  );
+};
 
 const Card = ({ title, children }) => (
   <div className="bg-white rounded-xl shadow-sm p-6">

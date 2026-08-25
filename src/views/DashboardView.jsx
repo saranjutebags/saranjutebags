@@ -554,8 +554,8 @@ const DashboardView = () => {
     const codOrders = normalizedOrders.filter((order) => (order.paymentMethod || '').toLowerCase().includes('cod')).length;
     const onlineOrders = normalizedOrders.filter((order) => (order.paymentMethod || '').toLowerCase().includes('online')).length;
     const totalProducts = products.length;
-    const lowStockProducts = products.filter((product) => product.stock > 0 && product.stock <= product.lowStockAlert).length;
-    const outOfStockProducts = products.filter((product) => product.stock <= 0).length;
+    const lowStockProducts = 0; // Using inStock boolean instead of numeric stock
+    const outOfStockProducts = products.filter((product) => product.inStock === false).length;
 
     const revenueByDay = normalizedOrders.reduce((accumulator, order) => {
       const key = new Date(order.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -941,8 +941,17 @@ const DashboardView = () => {
                   <td className="py-4 pr-3 text-gray-700">{formatCurrency(product.price)}<div className="text-xs text-gray-400">MRP {formatCurrency(product.originalPrice)}</div></td>
                   <td className="py-4 pr-3">
                     <div className="flex items-center gap-2">
-                      <input type="number" value={product.stock} onChange={(event) => updateProductStock(product.id, event.target.value)} className="w-20 rounded-xl border border-gray-200 px-3 py-2 bg-white" />
-                      {product.stock <= product.lowStockAlert && <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700">Low</span>}
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={product.inStock !== false}
+                          onChange={(e) => updateProduct(product.id, { inStock: e.target.checked, stock: e.target.checked ? 999 : 0 })}
+                          className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500"
+                        />
+                        <span className={`text-sm font-medium ${product.inStock === false ? 'text-red-600' : 'text-emerald-600'}`}>
+                          {product.inStock === false ? 'Out of Stock' : 'In Stock'}
+                        </span>
+                      </label>
                     </div>
                   </td>
                   <td className="py-4 pr-3">
@@ -1136,16 +1145,48 @@ const DashboardView = () => {
           <div className="glass rounded-3xl border border-emerald-100 p-6">
             <h4 className="text-xl font-bold text-gray-800 mb-4">Ordered Products</h4>
             <div className="space-y-3">
-              {selectedOrder.items.map((item) => (
-                <div key={item.id} className="flex items-center gap-4 rounded-2xl border border-gray-100 p-4 bg-white">
-                  <img src={item.images?.[0]} alt={item.name} className="w-16 h-16 object-contain rounded-2xl bg-emerald-50 border border-emerald-100" />
-                  <div className="flex-1">
-                    <p className="font-semibold text-gray-800">{item.name}</p>
-                    <p className="text-sm text-gray-500">Qty {item.quantity} • {formatCurrency(item.price)}</p>
+              {selectedOrder.items.map((item) => {
+                const hasStyles = item.selectedStyles && item.selectedStyles.length > 0;
+                const totalQty = item.totalStyleQuantity || item.quantity;
+                const itemTotal = item.price * totalQty;
+                
+                return (
+                  <div key={`${item.id}-${item.stylesKey || ''}`} className="rounded-2xl border border-gray-100 overflow-hidden bg-white">
+                    <div className="flex items-center gap-4 p-4">
+                      <img src={item.images?.[0]} alt={item.name} className="w-16 h-16 object-contain rounded-2xl bg-emerald-50 border border-emerald-100" />
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-800">{item.name}</p>
+                        <p className="text-sm text-gray-500">
+                          {hasStyles ? `Total Qty: ${totalQty} (${item.selectedStyles.length} styles)` : `Qty: ${totalQty}`} • {formatCurrency(item.price)}
+                        </p>
+                      </div>
+                      <p className="font-bold text-gray-800">{formatCurrency(itemTotal)}</p>
+                    </div>
+                    
+                    {hasStyles && (
+                      <div className="px-4 pb-4 pl-20 border-t border-gray-200 bg-emerald-50">
+                        <div className="space-y-2">
+                          {item.selectedStyles.map((style, idx) => (
+                            <div key={`${style.name}-${idx}`} className="flex items-center justify-between p-2 bg-white rounded-lg border border-emerald-100 text-sm">
+                              <div className="flex items-center gap-2">
+                                <span className="w-5 h-5 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-[10px] font-bold">
+                                  {idx + 1}
+                                </span>
+                                <span className="font-medium text-gray-800">{style.name}</span>
+                              </div>
+                              <div className="flex items-center gap-4 text-gray-600">
+                                <span>Qty: {style.quantity}</span>
+                                <span>{formatCurrency(style.price)} each</span>
+                                <span className="font-semibold text-emerald-700">{formatCurrency(style.total)}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <p className="font-bold text-gray-800">{formatCurrency(item.price * item.quantity)}</p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

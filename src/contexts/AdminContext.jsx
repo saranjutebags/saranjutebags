@@ -61,7 +61,7 @@ const defaultCompanySettings = {
   phone: '',
   email: 'sales@saranjutebags.co.in',
   invoicePrefix: 'INV',
-  website: 'https://saranjutebags.co.in',
+  website: 'https://saranjutebags.in',
   facebook: '',
   instagram: '',
   taxLabel: 'GST',

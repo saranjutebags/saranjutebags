@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { ShoppingBag, Trash2, ArrowLeft } from 'lucide-react';
+import { ShoppingBag, Trash2, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 
@@ -42,64 +42,130 @@ const CartView = () => {
 
         <div className="grid lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-4">
-            {cart.map((item) => (
-              <motion.div
-                key={item.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="glass rounded-2xl p-6 border border-emerald-100"
-              >
-                <div className="flex flex-col sm:flex-row gap-6">
-                  <div className="w-full sm:w-40 h-40 bg-gradient-to-br from-emerald-50 to-mint-50 rounded-xl flex items-center justify-center flex-shrink-0">
-                    <img
-                      src={item.images[0]}
-                      alt={item.name}
-                      className="h-full w-full object-contain"
-                    />
-                  </div>
-
-                  <div className="flex-1">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h3 className="text-xl font-bold text-gray-800 mb-2">{item.name}</h3>
-                        <p className="text-gray-600 text-sm mb-4">{item.category}</p>
-                      </div>
-                      <button
-                        onClick={() => removeFromCart(item.id)}
-                        className="p-2 text-gray-400 hover:text-red-500 transition-colors"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
+            {cart.map((item) => {
+              const hasStyles = item.selectedStyles && item.selectedStyles.length > 0;
+              const totalQty = item.totalStyleQuantity || item.quantity;
+              const itemTotal = item.price * totalQty;
+              
+              return (
+                <motion.div
+                  key={`${item.id}-${item.stylesKey || ''}`}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="glass rounded-2xl p-6 border border-emerald-100"
+                >
+                  <div className="flex flex-col sm:flex-row gap-6">
+                    <div className="w-full sm:w-40 h-40 bg-gradient-to-br from-emerald-50 to-mint-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <img
+                        src={item.images[0]}
+                        alt={item.name}
+                        className="h-full w-full object-contain"
+                      />
                     </div>
 
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className="font-medium text-gray-700">Qty:</span>
-                        <div className="flex items-center border border-gray-200 rounded-lg">
-                          <button
-                            onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                            className="px-3 py-2 hover:bg-emerald-50 transition-colors"
-                          >
-                            -
-                          </button>
-                          <span className="px-4 py-2 font-semibold">{item.quantity}</span>
-                          <button
-                            onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                            className="px-3 py-2 hover:bg-emerald-50 transition-colors"
-                          >
-                            +
-                          </button>
+                    <div className="flex-1">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <h3 className="text-xl font-bold text-gray-800 mb-2">{item.name}</h3>
+                          <p className="text-gray-600 text-sm mb-4">{item.category}</p>
+                        </div>
+                        <button
+                          onClick={() => removeFromCart(item.id)}
+                          className="p-2 text-gray-400 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
+
+                      {/* Styles Display */}
+                      {hasStyles && (
+                        <div className="mb-4 p-4 bg-emerald-50 rounded-xl border border-emerald-100">
+                          <div className="flex items-center gap-2 mb-3">
+                            <ShoppingBag className="w-4 h-4 text-emerald-600" />
+                            <span className="font-semibold text-emerald-800">Selected Styles:</span>
+                            <span className="text-sm text-emerald-600">({item.selectedStyles.length} style{item.selectedStyles.length !== 1 ? 's' : ''})</span>
+                          </div>
+                          <div className="space-y-2">
+                            {item.selectedStyles.map((style, idx) => (
+                              <div key={`${style.name}-${idx}`} className="flex items-center justify-between p-2 bg-white rounded-lg border border-emerald-100">
+                                <div className="flex items-center gap-3">
+                                  <span className="w-6 h-6 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-xs font-bold">
+                                    {idx + 1}
+                                  </span>
+                                  <div>
+                                    <p className="font-medium text-gray-800 text-sm">{style.name}</p>
+                                    <p className="text-xs text-gray-500">Qty: {style.quantity} × ₹{style.price}</p>
+                                  </div>
+                                </div>
+                                <span className="font-semibold text-emerald-700">₹{style.total}</span>
+                              </div>
+                            ))}
+                          </div>
+                          
+                          {/* Custom Design Details */}
+                          {item.selectedStyles.some(s => s.isCustomDesign) && (
+                            <div className="mt-3 pt-3 border-t border-emerald-200 space-y-2">
+                              {item.selectedStyles.filter(s => s.isCustomDesign).map((design, dIdx) => (
+                                <div key={`custom-design-${dIdx}`} className="p-3 bg-white rounded-lg border border-emerald-200">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="w-5 h-5 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-[10px] font-bold">🎨</span>
+                                    <span className="font-semibold text-emerald-800 text-sm">Custom Design Details</span>
+                                  </div>
+                                  {design.customText && (
+                                    <p className="text-xs text-gray-700"><strong>Text:</strong> {design.customText}</p>
+                                  )}
+                                  {design.customLogo && (
+                                    <div className="flex items-center gap-2">
+                                      <strong className="text-xs text-gray-700">Logo:</strong>
+                                      <img src={design.customLogo} alt="Custom Logo" className="w-10 h-10 object-contain rounded border border-gray-200" />
+                                    </div>
+                                  )}
+                                  {design.customDescription && (
+                                    <p className="text-xs text-gray-700"><strong>Details:</strong> {design.customDescription}</p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          
+                          <div className="mt-3 pt-3 border-t border-emerald-200 flex justify-between">
+                            <span className="font-medium text-gray-700">Total Quantity: {totalQty}</span>
+                            <span className="font-bold text-emerald-700">₹{itemTotal}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="font-medium text-gray-700">
+                            {hasStyles ? 'Total Qty:' : 'Qty:'}
+                          </span>
+                          <div className="flex items-center border border-gray-200 rounded-lg">
+                            <button
+                              onClick={() => updateQuantity(item.id, Math.max(1, totalQty - 1))}
+                              className="px-3 py-2 hover:bg-emerald-50 transition-colors"
+                            >
+                              -
+                            </button>
+                            <span className="px-4 py-2 font-semibold">{totalQty}</span>
+                            <button
+                              onClick={() => updateQuantity(item.id, totalQty + 1)}
+                              className="px-3 py-2 hover:bg-emerald-50 transition-colors"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <span className="text-2xl font-bold text-emerald-600">₹{itemTotal}</span>
                         </div>
                       </div>
-
-                      <div className="text-right">
-                        <span className="text-2xl font-bold text-emerald-600">₹{item.price * item.quantity}</span>
-                      </div>
                     </div>
                   </div>
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              );
+            })}
 
             <button
               onClick={clearCart}

@@ -177,14 +177,42 @@ const OrderInfoView = () => {
           </tr>
         </thead>
         <tbody>
-          {order.items.map((item, index) => (
-            <tr key={index}>
-              <td style={{ padding: '12px', border: '1px solid #ececec' }}>{item.name}</td>
-              <td style={{ padding: '12px', textAlign: 'center', border: '1px solid #ececec' }}>{item.quantity}</td>
-              <td style={{ padding: '12px', textAlign: 'right', border: '1px solid #ececec' }}>₹{item.price}</td>
-              <td style={{ padding: '12px', textAlign: 'right', border: '1px solid #ececec' }}>₹{(item.price * item.quantity).toFixed(2)}</td>
-            </tr>
-          ))}
+          {order.items.map((item, index) => {
+            const hasStyles = item.selectedStyles && item.selectedStyles.length > 0;
+            const totalQty = item.totalStyleQuantity || item.quantity;
+            const itemTotal = item.price * totalQty;
+            const customDesigns = item.selectedStyles?.filter(s => s.isCustomDesign) || [];
+            return (
+              <tr key={index}>
+                <td style={{ padding: '12px', border: '1px solid #ececec' }}>
+                  {item.name}
+                  {hasStyles && (
+                    <div style={{ marginTop: '8px', fontSize: '11px', color: '#666' }}>
+                      <strong>Styles:</strong>
+                      {item.selectedStyles.map((s, i) => (
+                        <div key={i} style={{ marginLeft: '10px', marginTop: '2px' }}>
+                          • {s.name} (Qty: {s.quantity}) = ₹{s.total}
+                        </div>
+                      ))}
+                      {customDesigns.length > 0 && (
+                        <div style={{ marginTop: '4px' }}>
+                          <strong>Custom Design:</strong>
+                          {customDesigns.map((d, di) => (
+                            <div key={di} style={{ marginLeft: '10px', marginTop: '2px', fontSize: '10px' }}>
+                              • Text: {d.customText || '—'} {d.customDescription ? `| Details: ${d.customDescription}` : ''}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </td>
+                <td style={{ padding: '12px', textAlign: 'center', border: '1px solid #ececec' }}>{totalQty}</td>
+                <td style={{ padding: '12px', textAlign: 'right', border: '1px solid #ececec' }}>₹{item.price}</td>
+                <td style={{ padding: '12px', textAlign: 'right', border: '1px solid #ececec' }}>₹{itemTotal.toFixed(2)}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
 
@@ -458,18 +486,78 @@ const OrderInfoView = () => {
             <div className="rounded-3xl border border-gray-100 bg-white p-6">
               <h2 className="text-xl font-bold text-gray-800 mb-4">Items Ordered</h2>
               <div className="space-y-4">
-                {order.items.map((item) => (
-                  <div key={item.id} className="flex items-center gap-4 rounded-2xl border border-gray-100 p-4">
-                    <img src={getItemImage(item, products)} alt={item.name} className="w-20 h-20 object-contain rounded-2xl bg-emerald-50 border border-emerald-100" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-gray-800">{item.name}</p>
-                      <p className="text-sm text-gray-500">Qty: {item.quantity} • ₹{item.price} each</p>
+                {order.items.map((item) => {
+                  const hasStyles = item.selectedStyles && item.selectedStyles.length > 0;
+                  const totalQty = item.totalStyleQuantity || item.quantity;
+                  const itemTotal = item.price * totalQty;
+                  
+                  return (
+                    <div key={`${item.id}-${item.stylesKey || ''}`} className="rounded-2xl border border-gray-100 overflow-hidden">
+                      <div className="flex items-center gap-4 p-4 bg-gray-50 border-b border-gray-100">
+                        <img src={getItemImage(item, products)} alt={item.name} className="w-20 h-20 object-contain rounded-2xl bg-emerald-50 border border-emerald-100" />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-gray-800">{item.name}</p>
+                          <p className="text-sm text-gray-500">
+                            {hasStyles ? `Total Qty: ${totalQty} (${item.selectedStyles.length} styles)` : `Qty: ${item.quantity}`} • ₹{item.price} each
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold text-gray-800">₹{itemTotal.toFixed(2)}</p>
+                        </div>
+                      </div>
+                      
+                      {hasStyles && (
+                        <div className="p-4 bg-emerald-50 border-t border-emerald-100">
+                          <div className="flex items-center gap-2 mb-3">
+                            <span className="font-semibold text-emerald-800">Selected Styles:</span>
+                          </div>
+                          <div className="space-y-2">
+{item.selectedStyles.map((style, idx) => (
+                                <div key={`${style.name}-${idx}`} className="flex items-center justify-between p-3 bg-white rounded-lg border border-emerald-100">
+                                  <div className="flex items-center gap-3">
+                                    <span className="w-7 h-7 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-xs font-bold">
+                                      {idx + 1}
+                                    </span>
+                                    <div>
+                                      <p className="font-medium text-gray-800 text-sm">{style.name}</p>
+                                      <p className="text-xs text-gray-500">Qty: {style.quantity} × ₹{style.price}</p>
+                                    </div>
+                                  </div>
+                                  <span className="font-semibold text-emerald-700">₹{style.total}</span>
+                                </div>
+                              ))}
+
+                              {/* Custom Design Details */}
+                              {item.selectedStyles.filter(s => s.isCustomDesign).map((design, dIdx) => (
+                                <div key={`custom-design-${dIdx}`} className="p-3 bg-white rounded-lg border border-emerald-200">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="w-6 h-6 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-xs font-bold">🎨</span>
+                                    <span className="font-semibold text-emerald-800 text-sm">Custom Design</span>
+                                  </div>
+                                  {design.customText && (
+                                    <p className="text-sm text-gray-700"><strong>Text:</strong> {design.customText}</p>
+                                  )}
+                                  {design.customLogo && (
+                                    <div className="flex items-center gap-3 mt-1">
+                                      <strong className="text-sm text-gray-700">Logo:</strong>
+                                      <img src={design.customLogo} alt="Custom Logo" className="w-12 h-12 object-contain rounded border border-gray-200" />
+                                    </div>
+                                  )}
+                                  {design.customDescription && (
+                                    <p className="text-sm text-gray-700 mt-1"><strong>Details:</strong> {design.customDescription}</p>
+                                  )}
+                                </div>
+                              ))}
+                          </div>
+                          <div className="mt-3 pt-3 border-t border-emerald-200 flex justify-between text-sm">
+                            <span className="font-medium text-gray-700">Subtotal for {item.name}</span>
+                            <span className="font-bold text-emerald-700">₹{itemTotal.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <div className="text-right">
-                      <p className="font-bold text-gray-800">₹{(item.price * item.quantity).toFixed(2)}</p>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 

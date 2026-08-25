@@ -7,6 +7,7 @@ import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
 import { convertFileToBase64 } from '../utils/imageUtils';
 import SEOHead from '../components/SEOHead';
+import StylesSelectionPopup from '../components/StylesSelectionPopup';
 
 const ProductView = () => {
   const { slug } = useParams();
@@ -32,6 +33,10 @@ const ProductView = () => {
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [copied, setCopied] = useState(false);
   
+  // Styles selection popup state
+  const [showStylesPopup, setShowStylesPopup] = useState(false);
+  const [pendingCartData, setPendingCartData] = useState(null);
+  
   const product = getProductBySlug(slug);
 
   const handleAddToCart = () => {
@@ -39,10 +44,41 @@ const ProductView = () => {
       navigate('/auth');
       return;
     }
-    addToCart(
-      { ...product, selectedImage: product.images[currentImage] || product.images[0] },
-      quantity, customText, customLogo
-    );
+    // If product has styles, show the styles selection popup
+    if (product?.styles?.length > 0) {
+      setPendingCartData({
+        product: { ...product, selectedImage: product.images[currentImage] || product.images[0] },
+        quantity,
+        customText,
+        customLogo
+      });
+      setShowStylesPopup(true);
+    } else {
+      addToCart(
+        { ...product, selectedImage: product.images[currentImage] || product.images[0] },
+        quantity, customText, customLogo
+      );
+    }
+  };
+
+  const handleStylesConfirm = (selection) => {
+    if (pendingCartData) {
+      addToCart(
+        pendingCartData.product,
+        pendingCartData.quantity,
+        selection.customText,
+        selection.customLogo,
+        selection.selectedStyles,
+        selection.customDescription
+      );
+      setPendingCartData(null);
+    }
+    setShowStylesPopup(false);
+  };
+
+  const handleStylesBack = () => {
+    setShowStylesPopup(false);
+    setPendingCartData(null);
   };
 
   const handleAddReview = async () => {
@@ -130,7 +166,8 @@ const ProductView = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
+    <>
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
       {product && (
         <SEOHead
           title={`${product.name} - Wholesale Jute Bag Manufacturer`}
@@ -154,7 +191,7 @@ const ProductView = () => {
               'url': `https://saranjutebags.co.in/product/${product.id}`,
               'priceCurrency': 'INR',
               'price': product.price,
-              'availability': (product.stock ?? 1) > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+              'availability': product.inStock !== false ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
               'seller': {
                 '@type': 'Organization',
                 'name': 'Saran Jute Bags',
@@ -283,34 +320,34 @@ const ProductView = () => {
 
             <p className="text-gray-700 text-lg mb-8 leading-relaxed">{product.description}</p>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-8">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
               <div className="glass rounded-xl p-4 border border-emerald-100">
                 <p className="text-gray-500 text-sm mb-1">Material</p>
                 <p className="font-semibold text-gray-800">{product.material}</p>
               </div>
-              <div className={`glass rounded-xl p-4 border ${product.stock <= 0 ? 'border-red-200' : product.stock <= 5 ? 'border-amber-200' : 'border-emerald-100'}`}>
-                <p className="text-gray-500 text-sm mb-1">Stock</p>
-                {product.stock <= 0 ? (
+              <div className={`glass rounded-xl p-4 border ${product.inStock === false ? 'border-red-200' : 'border-emerald-100'}`}>
+                <p className="text-gray-500 text-sm mb-1">Availability</p>
+                {product.inStock === false ? (
                   <p className="font-semibold text-red-600 flex items-center gap-1.5">
                     <X className="w-4 h-4" /> Out of Stock
                   </p>
-                ) : product.stock <= 5 ? (
-                  <p className="font-semibold text-amber-600 flex items-center gap-1.5">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
-                    </span>
-                    Hurry, Only {product.stock} left!
-                  </p>
                 ) : (
                   <p className="font-semibold text-emerald-600 flex items-center gap-1.5">
-                    <Check className="w-4 h-4" /> In Stock ({product.stock})
+                    <Check className="w-4 h-4" /> In Stock
                   </p>
                 )}
               </div>
               <div className="glass rounded-xl p-4 border border-emerald-100">
                 <p className="text-gray-500 text-sm mb-1">Weight</p>
                 <p className="font-semibold text-gray-800">{product.weightPerPiece ? `${product.weightPerPiece} kg/piece` : 'N/A'}</p>
+              </div>
+              <div className="glass rounded-xl p-4 border border-emerald-100">
+                <p className="text-gray-500 text-sm mb-1">Dimensions</p>
+                <p className="font-semibold text-gray-800">
+                  {product.dimensions && (product.dimensions.length || product.dimensions.width || product.dimensions.height)
+                    ? `${product.dimensions.length || '-'} × ${product.dimensions.width || '-'} × ${product.dimensions.height || '-'} ${product.dimensions.unit || 'cm'}`
+                    : 'N/A'}
+                </p>
               </div>
             </div>
 
@@ -349,35 +386,14 @@ const ProductView = () => {
               </div>
             )}
 
-            <div className="flex items-center gap-6 mb-8">
-              <div className="flex items-center gap-3">
-                <span className="font-medium text-gray-700">Quantity:</span>
-                <div className="flex items-center border border-gray-200 rounded-xl">
-                  <button
-                    onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                    className="px-4 py-2 hover:bg-emerald-50 transition-colors"
-                  >
-                    -
-                  </button>
-                  <span className="px-6 py-2 font-semibold">{quantity}</span>
-                  <button
-                    onClick={() => setQuantity(quantity + 1)}
-                    className="px-4 py-2 hover:bg-emerald-50 transition-colors"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-            </div>
-
             <div className="flex flex-col sm:flex-row gap-4 mb-8">
               <button
                 onClick={handleAddToCart}
-                disabled={product.stock !== undefined && product.stock <= 0}
-                className={`flex-1 py-4 text-lg font-bold flex items-center justify-center gap-2 ${product.stock !== undefined && product.stock <= 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed rounded-xl' : 'btn-primary'}`}
+                disabled={product.inStock === false}
+                className={`flex-1 py-4 text-lg font-bold flex items-center justify-center gap-2 ${product.inStock === false ? 'bg-gray-300 text-gray-500 cursor-not-allowed rounded-xl' : 'btn-primary'}`}
               >
                 <ShoppingBag className="w-6 h-6" />
-                {product.stock !== undefined && product.stock <= 0 ? 'Out of Stock' : 'Add to Cart'}
+                {product.inStock === false ? 'Out of Stock' : 'Add to Cart'}
               </button>
               <button
                 onClick={() => toggleWishlist(product)}
@@ -576,6 +592,14 @@ const ProductView = () => {
         </div>
       </div>
     </div>
+      <StylesSelectionPopup
+        isOpen={showStylesPopup}
+        onClose={() => { setShowStylesPopup(false); setPendingCartData(null); }}
+        product={pendingCartData?.product || product}
+        onConfirm={handleStylesConfirm}
+        onBack={handleStylesBack}
+      />
+    </>
   );
 };
 

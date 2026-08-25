@@ -291,7 +291,7 @@ export const CartProvider = ({ children }) => {
   }, [pricingSettings]);
 
   // ─── Cart ────────────────────────────────────────────────────────────────────
-  const addToCart = (product, quantity = 1, customText = '', customLogo = '') => {
+  const addToCart = (product, quantity = 1, customText = '', customLogo = '', selectedStyles = null, customDescription = '') => {
     let blocked = false;
     setCart(prev => {
       if (product.stock !== undefined && product.stock <= 0) {
@@ -299,7 +299,14 @@ export const CartProvider = ({ children }) => {
         setCartToast({ id: product.id, name: product.name, quantity: 0, error: 'Out of stock' });
         return prev;
       }
-      const existingIndex = prev.findIndex(item => item.id === product.id && item.customText === customText && item.customLogo === customLogo);
+      // Create a unique key for the cart item including styles
+      const stylesKey = selectedStyles ? JSON.stringify(selectedStyles.map(s => s.name).sort()) : '';
+      const existingIndex = prev.findIndex(item => 
+        item.id === product.id && 
+        item.customText === customText && 
+        item.customLogo === customLogo &&
+        item.stylesKey === stylesKey
+      );
       if (existingIndex > -1) {
         const newQty = prev[existingIndex].quantity + quantity;
         if (product.stock !== undefined && newQty > product.stock) {
@@ -316,7 +323,19 @@ export const CartProvider = ({ children }) => {
         setCartToast({ id: product.id, name: product.name, quantity: 0, error: `Only ${product.stock} available` });
         return prev;
       }
-      return [...prev, { ...product, quantity, customText, customLogo }];
+      const newItem = { 
+        ...product, 
+        quantity, 
+        customText, 
+        customLogo,
+        customDescription,
+        selectedStyles: selectedStyles || [],
+        stylesKey,
+        // Calculate total price based on styles: base price * total quantity across all styles
+        totalStyleQuantity: selectedStyles ? selectedStyles.reduce((sum, s) => sum + (s.quantity || 1), 0) : quantity,
+        effectivePrice: product.price // base price per unit
+      };
+      return [...prev, newItem];
     });
     if (!blocked) {
       setCartToast({ id: product.id, name: product.name, quantity });
@@ -634,8 +653,19 @@ export const CartProvider = ({ children }) => {
 
   const isInWishlist = (productId) => wishlist.some(item => item.id === productId);
 
-  const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const cartTotal = cart.reduce((sum, item) => {
+    // If item has selectedStyles, calculate total based on each style's price * quantity
+    if (item.selectedStyles && item.selectedStyles.length > 0) {
+      const stylesTotal = item.selectedStyles.reduce((styleSum, style) => {
+        return styleSum + (style.price * (style.quantity || 1));
+      }, 0);
+      return sum + stylesTotal;
+    }
+    // Fallback for items without styles
+    const qty = item.totalStyleQuantity || item.quantity;
+    return sum + (item.price * qty);
+  }, 0);
+  const cartCount = cart.reduce((sum, item) => sum + (item.totalStyleQuantity || item.quantity), 0);
 
   const value = {
     cart,

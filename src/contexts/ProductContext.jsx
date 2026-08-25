@@ -146,6 +146,9 @@ export const ProductProvider = ({ children }) => {
       sizes: product.sizes || [],
       tags: product.tags || [],
       specifications: product.specifications || [],
+      dimensions: product.dimensions || { length: '', width: '', height: '', unit: 'cm' },
+      styles: product.styles || [],
+      customDesignFee: Number(product.customDesignFee) || 100,
       createdAt: new Date().toISOString(),
     };
 
@@ -185,6 +188,9 @@ export const ProductProvider = ({ children }) => {
       featured: false,
       bestseller: false,
       newArrival: false,
+      dimensions: source.dimensions || { length: '', width: '', height: '', unit: 'cm' },
+      styles: source.styles || [],
+      customDesignFee: source.customDesignFee || 100,
       createdAt: new Date().toISOString(),
     };
 

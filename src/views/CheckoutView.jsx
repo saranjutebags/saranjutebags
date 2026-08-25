@@ -27,14 +27,7 @@ const emptyAddress = {
   isDefault: false,
 };
 
-const emptyCustomOrder = {
-  customerName: '',
-  nameOnBag: '',
-  bagType: 'Jute Bag',
-  quantity: 1,
-  description: '',
-  customImage: '',
-};
+
 
 /* ───────────────── Coupon helpers ───────────────── */
 const parseCouponDiscount = (discountStr = '') => {
@@ -161,8 +154,6 @@ const CheckoutView = () => {
     ...emptyAddress,
     name: userData?.displayName || '',
   }));
-  const [customOrderEnabled, setCustomOrderEnabled] = useState(false);
-  const [customOrder, setCustomOrder] = useState(emptyCustomOrder);
   const [popup, setPopup] = useState(null);
   const [delhiveryCharge, setDelhiveryCharge] = useState(null);
   const [delhiveryLoading, setDelhiveryLoading] = useState(false);
@@ -332,25 +323,24 @@ const CheckoutView = () => {
   const testItem = useMemo(() => cartList.find(item => item.isTestProduct || item.id === 'test-demo-product'), [cartList]);
   const hasTestProduct = Boolean(testItem);
 
-  const isCustom = (customOrderEnabled && customOrder.quantity > 0) || cartList.some(item => item.customText || item.customLogo || item.category === 'Customized' || item.subCategory === 'Custom');
-  const customOrderFee = isCustom ? 100 : 0;
+  const isCustom = cartList.some(item => item.customText || item.customLogo || item.selectedStyles?.some(s => s.isCustomDesign) || item.category === 'Customized' || item.subCategory === 'Custom');
 
   const calculatedPricing = useMemo(() => {
     if (hasTestProduct && testItem) {
       const subtotal = Number(testItem.price || 1.00) * Number(testItem.quantity || 1);
       const shipping = Number(testItem.deliveryFee !== undefined ? testItem.deliveryFee : (testProductSettings?.deliveryFee ?? 0));
       const gst = Number(testItem.gstAmount !== undefined ? testItem.gstAmount : (testProductSettings?.gstAmount ?? 0)) * Number(testItem.quantity || 1);
-      const total = Math.round((subtotal - couponDiscountAmount + shipping + gst + customOrderFee) * 100) / 100;
+      const total = Math.round((subtotal - couponDiscountAmount + shipping + gst) * 100) / 100;
       return { subtotal, shipping, gst, total, isTest: true };
     } else {
       const shipping = shippingDetails.shippingCharge;
       const taxable = Math.max((cartTotal || 0) - couponDiscountAmount, 0);
       const gstRate = pricingSettings?.gstRate || 0;
       const gst = Math.round(taxable * (gstRate / 100) * 100) / 100;
-      const total = Math.round((taxable + shipping + gst + customOrderFee) * 100) / 100;
+      const total = Math.round((taxable + shipping + gst) * 100) / 100;
       return { subtotal: cartTotal || 0, shipping, gst, total, isTest: false };
     }
-  }, [hasTestProduct, testItem, testProductSettings, cartTotal, couponDiscountAmount, shippingDetails.shippingCharge, pricingSettings?.gstRate, customOrderFee]);
+  }, [hasTestProduct, testItem, testProductSettings, cartTotal, couponDiscountAmount, shippingDetails.shippingCharge, pricingSettings?.gstRate]);
 
   const shipping = calculatedPricing.shipping;
   const gst = calculatedPricing.gst;
@@ -362,12 +352,10 @@ const CheckoutView = () => {
     shipping,
     gstRate: hasTestProduct ? 0 : (pricingSettings?.gstRate || 0),
     gstAmount: gst,
-    customOrderFee,
     grandTotal: total,
   };
 
-  const CUSTOM_ADVANCE = 100;
-  const advance = paymentMethod === 'cod' ? (isCustom ? CUSTOM_ADVANCE : 0) : total;
+  const advance = paymentMethod === 'cod' ? 0 : total;
   const balance = Math.max(total - advance, 0);
 
   const handleInternationalWhatsAppOrder = () => {
@@ -381,17 +369,13 @@ const CheckoutView = () => {
     const cartItemsFormatted = cart.map((item, idx) => {
       let line = `${idx + 1}. *${item.name}*\n   • Qty: ${item.quantity} | ₹${(item.price * item.quantity).toFixed(2)}`;
       if (item.customText) line += `\n   • Custom Print: "${item.customText}"`;
+      if (item.selectedStyles?.some(s => s.isCustomDesign)) {
+        const customDesign = item.selectedStyles.find(s => s.isCustomDesign);
+        if (customDesign?.customText) line += `\n   • Design Text: "${customDesign.customText}"`;
+        if (customDesign?.customDescription) line += `\n   • Design Details: ${customDesign.customDescription}`;
+      }
       return line;
     }).join('\n');
-
-    let customDetailsStr = '';
-    if (customOrderEnabled && customOrder.quantity > 0) {
-      customDetailsStr = `\n\n*✨ Custom Bag Order Details:*\n` +
-        `• Bag Type: ${customOrder.bagType}\n` +
-        `• Name on Bag: ${customOrder.nameOnBag || 'N/A'}\n` +
-        `• Quantity: ${customOrder.quantity}\n` +
-        `• Instructions: ${customOrder.description || 'N/A'}`;
-    }
 
     const messageText =
       `🌐 *INTERNATIONAL ORDER INQUIRY - SARAN JUTE BAGS*\n` +
@@ -401,8 +385,7 @@ const CheckoutView = () => {
       `• Mobile: ${custPhone}\n` +
       `• Country: ${countryName}\n` +
       `• Delivery Address: ${addrStr}\n\n` +
-      `📦 *CART PRODUCTS (${cart.length}):*\n${cartItemsFormatted}` +
-      `${customDetailsStr}\n\n` +
+      `📦 *CART PRODUCTS (${cart.length}):*\n${cartItemsFormatted}\n\n` +
       `💰 *ORDER SUMMARY:*\n` +
       `• Total Weight: ${shippingDetails.totalWeight.toFixed(2)} kg\n` +
       `• Cart Subtotal: ₹${cartTotal.toFixed(2)}\n` +
@@ -642,7 +625,6 @@ const CheckoutView = () => {
       shippingCharge: pricing.shipping,
       gstRate: pricing.gstRate,
       gstAmount: pricing.gstAmount,
-      customOrderFee: pricing.customOrderFee || 0,
       grandTotal: pricing.grandTotal,
       total: pricing.grandTotal,
       paidAmount: 0,
@@ -656,13 +638,12 @@ const CheckoutView = () => {
         email: user?.email || '',
       },
       userEmail: user?.email || '',
-      customOrder: isCustom ? customOrder : null,
     };
 
     try {
-      order.pendingAmount = isCustom ? Math.max(total - advance, 0) : 0;
+      order.pendingAmount = 0; // No advance for COD, full amount due on delivery
 
-      if (paymentMethod === 'online' || isCustom) {
+      if (paymentMethod === 'online') {
         order.paymentStatus = 'Pending Payment';
         const rzpResult = await handleRazorpayPayment(order);
 
@@ -737,85 +718,7 @@ const CheckoutView = () => {
             className="lg:col-span-2 glass rounded-2xl p-4 sm:p-6 border border-emerald-100 overflow-hidden"
           >
             <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gradient mb-2">Checkout</h1>
-            <p className="text-xs sm:text-sm text-gray-600 mb-6">Review your order, pick a saved address, or add a new one before paying.</p>
-
-            {/* Custom Order */}
-            <div className="mb-6 rounded-2xl border border-emerald-100 bg-white p-4 sm:p-5">
-              <div className="flex items-center justify-between gap-4 mb-3">
-                <div>
-                  <h2 className="text-base sm:text-lg md:text-xl font-bold text-gray-800">Custom Order</h2>
-                  <p className="text-xs sm:text-sm text-gray-600">Enter customer details, text to print, upload image, and add description.</p>
-                </div>
-                <button onClick={() => setCustomOrderEnabled(!customOrderEnabled)} className={`px-3 py-2 rounded-xl font-semibold text-xs sm:text-sm ${customOrderEnabled ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
-                  {customOrderEnabled ? 'Enabled' : 'Enable'}
-                </button>
-              </div>
-
-              {customOrderEnabled && (
-                <div className="space-y-3 mt-4">
-                  <div className="grid sm:grid-cols-2 gap-3">
-                    <input value={customOrder.customerName} onChange={(event) => setCustomOrder({ ...customOrder, customerName: event.target.value })} placeholder="Customer name" className="px-3 py-2 sm:px-4 sm:py-3 bg-white border border-gray-200 rounded-xl text-sm" />
-                    <input value={customOrder.nameOnBag} onChange={(event) => setCustomOrder({ ...customOrder, nameOnBag: event.target.value })} placeholder="Name on bag" className="px-3 py-2 sm:px-4 sm:py-3 bg-white border border-gray-200 rounded-xl text-sm" />
-                    <select value={customOrder.bagType} onChange={(event) => setCustomOrder({ ...customOrder, bagType: event.target.value })} className="px-3 py-2 sm:px-4 sm:py-3 bg-white border border-gray-200 rounded-xl text-sm">
-                      <option>Jute Bag</option>
-                      <option>Cotton Bag</option>
-                      <option>Canvas Bag</option>
-                    </select>
-                    <input type="number" min="1" value={customOrder.quantity} onChange={(event) => setCustomOrder({ ...customOrder, quantity: Number(event.target.value) })} placeholder="Quantity" className="px-3 py-2 sm:px-4 sm:py-3 bg-white border border-gray-200 rounded-xl text-sm" />
-                  </div>
-
-                  {/* Custom Image Upload */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-gray-700">Upload Custom Image (Logo/Design)</label>
-                    {customOrder.customImage && (
-                      <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl p-3">
-                        <img src={customOrder.customImage} alt="Custom" className="w-16 h-16 object-contain rounded-lg" />
-                        <button
-                          onClick={() => setCustomOrder({ ...customOrder, customImage: '' })}
-                          className="text-red-600 hover:text-red-700 text-xs font-medium"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    )}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      id="customImageUpload"
-                      onChange={async (e) => {
-                        if (e.target.files && e.target.files[0]) {
-                          const file = e.target.files[0];
-                          const reader = new FileReader();
-                          reader.onload = (event) => {
-                            setCustomOrder({ ...customOrder, customImage: event.target.result });
-                          };
-                          reader.readAsDataURL(file);
-                        }
-                      }}
-                    />
-                    <label
-                      htmlFor="customImageUpload"
-                      className="flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-emerald-300 rounded-xl hover:bg-emerald-50 cursor-pointer transition-colors text-sm text-gray-700"
-                    >
-                      <Upload className="w-4 h-4 text-emerald-600" />
-                      {customOrder.customImage ? 'Change Image' : 'Upload Image'}
-                    </label>
-                  </div>
-
-                  {/* Custom Description */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-gray-700">Custom Requirements / Description</label>
-                    <textarea
-                      value={customOrder.description}
-                      onChange={(event) => setCustomOrder({ ...customOrder, description: event.target.value })}
-                      placeholder="Describe your custom requirements (size, color, design, etc.)"
-                      className="w-full px-3 py-2 sm:px-4 sm:py-3 bg-white border border-gray-200 rounded-xl text-sm min-h-[100px]"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
+<p className="text-xs sm:text-sm text-gray-600 mb-6">Review your order, pick a saved address, or add a new one before paying.</p>
 
             {/* Coupon Section */}
             <div className="mb-6 rounded-2xl border border-emerald-100 bg-white p-4 sm:p-5">
@@ -995,10 +898,8 @@ const CheckoutView = () => {
                         <p className="font-semibold text-gray-800 text-xs sm:text-sm">Cash on Delivery (COD)</p>
                         {!shippingDetails.codAvailable ? (
                           <p className="text-xs sm:text-sm text-amber-700">Not available for this delivery location</p>
-                        ) : isCustom ? (
-                          <p className="text-xs sm:text-sm text-gray-600">Pay ₹100 advance now (Razorpay), balance ₹{balance.toFixed(2)} on delivery</p>
                         ) : (
-                          <p className="text-xs sm:text-sm text-gray-600">Pay on delivery — no advance required</p>
+                          <p className="text-xs sm:text-sm text-gray-600">Pay ₹{total.toFixed(2)} on delivery — no advance required</p>
                         )}
                       </div>
                     </div>
@@ -1013,9 +914,7 @@ const CheckoutView = () => {
                       <div>
                         <p className="font-semibold text-gray-800 text-xs sm:text-sm">Online Payment (UPI / Card / Netbanking)</p>
                         <p className="text-xs sm:text-sm text-gray-600">
-                          {isCustom
-                            ? `Pay ₹${advance.toFixed(2)} advance now, balance ₹${balance.toFixed(2)} on delivery`
-                            : `Pay ₹${total.toFixed(2)} securely through Razorpay`}
+                          Pay ₹{total.toFixed(2)} securely through Razorpay
                         </p>
                       </div>
                     </div>
@@ -1114,12 +1013,6 @@ const CheckoutView = () => {
                     Coupon ({appliedCoupon?.code})
                   </span>
                   <span className="font-bold text-xs sm:text-sm">-₹{couponDiscountAmount.toFixed(2)}</span>
-                </div>
-              )}
-              {isCustom && (
-                <div className="flex items-center justify-between text-emerald-700 bg-emerald-50/60 p-2 rounded-lg border border-emerald-200">
-                  <span className="font-semibold text-xs sm:text-sm">Customization Charge</span>
-                  <span className="font-bold text-xs sm:text-sm">+₹100.00</span>
                 </div>
               )}
               <div className="flex items-center justify-between">
