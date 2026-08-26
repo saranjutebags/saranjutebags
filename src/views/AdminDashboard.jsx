@@ -1200,18 +1200,18 @@ const AdminDashboard = () => {
 
           {/* Dimensions */}
           <div className="space-y-4 md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700">Dimensions</label>
+            <label className="block text-sm font-medium text-gray-700">Dimensions (H × W × D)</label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="space-y-1">
-                <label className="block text-xs font-medium text-gray-600">Length</label>
+                <label className="block text-xs font-medium text-gray-600">Height</label>
                 <input
                   type="number"
                   step="0.1"
                   min="0"
-                  value={productForm.dimensions?.length || ''}
-                  onChange={(e) => setProductForm({ ...productForm, dimensions: { ...productForm.dimensions, length: e.target.value } })}
+                  value={productForm.dimensions?.height || ''}
+                  onChange={(e) => setProductForm({ ...productForm, dimensions: { ...productForm.dimensions, height: e.target.value } })}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                  placeholder="Length"
+                  placeholder="Height"
                 />
               </div>
               <div className="space-y-1">
@@ -1227,15 +1227,15 @@ const AdminDashboard = () => {
                 />
               </div>
               <div className="space-y-1">
-                <label className="block text-xs font-medium text-gray-600">Height</label>
+                <label className="block text-xs font-medium text-gray-600">Depth</label>
                 <input
                   type="number"
                   step="0.1"
                   min="0"
-                  value={productForm.dimensions?.height || ''}
-                  onChange={(e) => setProductForm({ ...productForm, dimensions: { ...productForm.dimensions, height: e.target.value } })}
+                  value={productForm.dimensions?.length || ''}
+                  onChange={(e) => setProductForm({ ...productForm, dimensions: { ...productForm.dimensions, length: e.target.value } })}
                   className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                  placeholder="Height"
+                  placeholder="Depth"
                 />
               </div>
               <div className="space-y-1">

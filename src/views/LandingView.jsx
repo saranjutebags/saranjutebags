@@ -281,9 +281,6 @@ const LandingView = () => {
                             <span className="text-xs text-gray-400 line-through ml-1">₹{product.originalPrice}</span>
                           )}
                         </div>
-                        <button onClick={() => addToCart(product)} className="p-2 bg-gradient-to-r from-emerald-500 to-green-500 text-white rounded-xl hover:shadow-lg transition-all">
-                          <ShoppingBag className="w-4 h-4" />
-                        </button>
                       </div>
                     </div>
                   </motion.div>
