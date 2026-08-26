@@ -342,7 +342,7 @@ const ProductView = () => {
                 <p className="font-semibold text-gray-800">{product.weightPerPiece ? `${product.weightPerPiece} kg/piece` : 'N/A'}</p>
               </div>
 <div className="glass rounded-xl p-4 border border-emerald-100">
-                  <p className="text-gray-500 text-sm mb-1">HEIGHT X WIDTH X DEPTH (H X W X D)</p>
+                  <p className="text-gray-500 text-sm mb-1">Dimensions (H x W x D)</p>
                   <p className="font-semibold text-gray-800">
                     {product.dimensions && (product.dimensions.length || product.dimensions.width || product.dimensions.height)
                       ? `${product.dimensions.height || '-'} × ${product.dimensions.width || '-'} × ${product.dimensions.length || '-'} ${product.dimensions.unit || 'cm'}`

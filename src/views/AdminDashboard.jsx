@@ -1200,7 +1200,7 @@ const AdminDashboard = () => {
 
           {/* Dimensions */}
           <div className="space-y-4 md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700">Dimensions (H × W × D)</label>
+            <label className="block text-sm font-medium text-gray-700">Dimensions (H x W x D)</label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="space-y-1">
                 <label className="block text-xs font-medium text-gray-600">Height</label>
