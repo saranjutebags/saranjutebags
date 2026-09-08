@@ -96,8 +96,10 @@ const AdminDashboard = () => {
     styles: [],
     customDesignFee: 100,
   });
-  const [productImages, setProductImages] = useState([]);
-  
+const [productImages, setProductImages] = useState([]);
+  // Unified ordered images: { id, src, type: 'upload' | 'url' }
+  const [orderedImages, setOrderedImages] = useState([]);
+   
   // Image modal state
   const [imageModal, setImageModal] = useState({ isOpen: false, src: '', alt: '' });
 
