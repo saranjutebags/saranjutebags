@@ -18,8 +18,8 @@ export const sendOrderStatusNotification = async (order, status) => {
   let subject = `Saran Jute Bags - Order Update (${status})`;
   let bodyContent = '';
 
-  const primaryColor = '#059669'; // Emerald Green
-  const secondaryColor = '#10b981';
+  const primaryColor = '#1B4D3E'; // Evergreen
+  const secondaryColor = '#3E7A63';
 
   switch (status) {
     case 'Confirmed':
@@ -140,7 +140,7 @@ export const sendOrderStatusNotification = async (order, status) => {
               ${order.discountAmount ? `
               <tr>
                 <td style="font-size: 14px; color: #4b5563; padding: 4px 0;">Discount</td>
-                <td style="font-size: 14px; color: #059669; text-align: right; padding: 4px 0;">-₹${Number(order.discountAmount).toFixed(2)}</td>
+                <td style="font-size: 14px; color: #1B4D3E; text-align: right; padding: 4px 0;">-₹${Number(order.discountAmount).toFixed(2)}</td>
               </tr>` : ''}
               <tr>
                 <td style="font-size: 14px; color: #4b5563; padding: 4px 0;">Shipping</td>

@@ -307,14 +307,14 @@ const OrderInfoView = () => {
             <div className="flex flex-wrap gap-3 justify-center sm:justify-start">
               <button
                 onClick={() => setShowInvoiceModal(true)}
-                className="px-4 py-3 rounded-2xl font-semibold inline-flex items-center gap-2 bg-white text-emerald-600 shadow-lg hover:bg-emerald-50 transition-colors"
+                className="px-4 py-3 rounded-2xl font-semibold inline-flex items-center gap-2 bg-white text-[#1B4D3E] shadow-lg hover:bg-[#EEF4F1] transition-colors"
               >
                 <Eye className="w-5 h-5" />
                 View Invoice
               </button>
               <button
                 onClick={downloadInvoicePdf}
-                className="px-4 py-3 rounded-2xl font-semibold inline-flex items-center gap-2 bg-white text-emerald-600 shadow-lg hover:bg-emerald-50 transition-colors"
+                className="px-4 py-3 rounded-2xl font-semibold inline-flex items-center gap-2 bg-white text-[#1B4D3E] shadow-lg hover:bg-[#EEF4F1] transition-colors"
               >
                 <Download className="w-5 h-5" />
                 Download Invoice
@@ -421,7 +421,7 @@ const OrderInfoView = () => {
                       <div key={step.key} className="flex items-start gap-4">
                         {/* Icon + connecting line */}
                         <div className="flex flex-col items-center shrink-0">
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${active ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 bg-white'}`}>
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${active ? 'border-[#1B4D3E] bg-emerald-50' : 'border-gray-200 bg-white'}`}>
                             <img
                               src={step.gif}
                               alt={step.label}
@@ -429,7 +429,7 @@ const OrderInfoView = () => {
                             />
                           </div>
                           {!isLast && (
-                            <div className={`w-0.5 h-8 mt-1 rounded-full ${index < currentStageIndex ? 'bg-emerald-400' : 'bg-gray-200'}`} />
+                            <div className={`w-0.5 h-8 mt-1 rounded-full ${index < currentStageIndex ? 'bg-[#3E7A63]' : 'bg-gray-200'}`} />
                           )}
                         </div>
 
@@ -440,7 +440,7 @@ const OrderInfoView = () => {
                             <p className="text-xs mt-0.5">{step.desc}</p>
                           )}
                           {index < currentStageIndex && (
-                            <p className="text-xs text-emerald-400 mt-0.5">Completed</p>
+                            <p className="text-xs text-[#3E7A63] mt-0.5">Completed</p>
                           )}
                         </div>
                       </div>
@@ -464,7 +464,7 @@ const OrderInfoView = () => {
                         href={`https://www.delhivery.com/tracking/${order.trackingNumber}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-white text-emerald-700 rounded-lg hover:bg-emerald-50 transition-colors text-sm font-semibold"
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-white text-[#1B4D3E] rounded-lg hover:bg-[#EEF4F1] transition-colors text-sm font-semibold"
                       >
                         <ExternalLink className="w-4 h-4" />
                         Track on Delhivery

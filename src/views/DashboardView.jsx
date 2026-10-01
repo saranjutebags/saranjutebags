@@ -227,7 +227,7 @@ const MetricCard = ({ label, value, icon: Icon, accent = 'text-emerald-600', isD
     <div className="flex items-center justify-between gap-4">
       <div>
         <p className={`${isDarkMode ? 'text-slate-400' : 'text-gray-500'} text-sm font-medium`}>{label}</p>
-        <p className={`text-2xl font-bold mt-1 ${isDarkMode ? 'text-emerald-400' : 'text-gradient'}`}>{value}</p>
+        <p className={`text-2xl font-bold mt-1 ${isDarkMode ? 'text-[#3E7A63]' : 'text-gradient'}`}>{value}</p>
       </div>
       <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-slate-700' : 'bg-emerald-100'}`}>
         <Icon className={`w-6 h-6 ${accent}`} />
@@ -266,8 +266,8 @@ const SvgLineChart = ({ data, isDarkMode }) => {
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full overflow-visible">
         <defs>
           <linearGradient id="lineGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#10b981" stopOpacity="0.4" />
-            <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+            <stop offset="0%" stopColor="#3E7A63" stopOpacity="0.4" />
+            <stop offset="100%" stopColor="#3E7A63" stopOpacity="0.0" />
           </linearGradient>
         </defs>
 
@@ -277,7 +277,7 @@ const SvgLineChart = ({ data, isDarkMode }) => {
           const gridVal = maxVal - r * valRange;
           return (
             <g key={i} className="opacity-20">
-              <line x1={padding} y1={y} x2={width - padding} y2={y} stroke={isDarkMode ? '#94a3b8' : '#059669'} strokeWidth={1} strokeDasharray="4 4" />
+              <line x1={padding} y1={y} x2={width - padding} y2={y} stroke={isDarkMode ? '#94a3b8' : '#1B4D3E'} strokeWidth={1} strokeDasharray="4 4" />
               <text x={padding - 5} y={y + 4} textAnchor="end" className="text-[9px] font-medium fill-current text-gray-400">{Math.round(gridVal)}</text>
             </g>
           );
@@ -288,13 +288,13 @@ const SvgLineChart = ({ data, isDarkMode }) => {
 
         {/* Stroke Line */}
         {pathD && (
-          <path d={pathD} fill="none" stroke="#10b981" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+          <path d={pathD} fill="none" stroke="#1B4D3E" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
         )}
 
         {/* Dots */}
         {points.map((p, i) => (
           <g key={i} className="group cursor-pointer">
-            <circle cx={p.x} cy={p.y} r={4} fill="#ffffff" stroke="#10b981" strokeWidth={2.5} className="transition-all hover:r-6" />
+            <circle cx={p.x} cy={p.y} r={4} fill="#ffffff" stroke="#1B4D3E" strokeWidth={2.5} className="transition-all hover:r-6" />
             <circle cx={p.x} cy={p.y} r={12} fill="transparent" />
             <title>{`${p.label}: ₹${p.value.toFixed(2)}`}</title>
           </g>
@@ -349,8 +349,8 @@ const SvgBarChart = ({ data, isDarkMode }) => {
         })}
         <defs>
           <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#10b981" />
-            <stop offset="100%" stopColor="#059669" />
+            <stop offset="0%" stopColor="#3E7A63" />
+            <stop offset="100%" stopColor="#1B4D3E" />
           </linearGradient>
         </defs>
       </svg>
@@ -367,7 +367,7 @@ const SvgPieChart = ({ data, isDarkMode }) => {
   const center = size / 2;
   const radius = 70;
 
-  const colors = ['#10b981', '#059669', '#34d399', '#047857', '#6ee7b7', '#059669'];
+  const colors = ['#3E7A63', '#1B4D3E', '#5E9277', '#163F34', '#7FAE94', '#0C211C'];
   let accumulatedAngle = 0;
 
   return (
@@ -1757,7 +1757,7 @@ const DashboardView = () => {
         <div className="flex flex-col xl:flex-row gap-6">
           <aside className="xl:w-80 glass rounded-3xl border border-emerald-100 p-5 h-fit xl:sticky xl:top-24">
             <div className="flex items-center gap-4 mb-6 pb-5 border-b border-emerald-100">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-500 to-green-500 text-white flex items-center justify-center text-2xl font-bold">{(user?.displayName?.[0] || user?.email?.[0] || 'A').toUpperCase()}</div>
+              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#1B4D3E] to-[#3E7A63] text-white flex items-center justify-center text-2xl font-bold">{(user?.displayName?.[0] || user?.email?.[0] || 'A').toUpperCase()}</div>
               <div>
                 <h2 className="text-xl font-bold text-gray-800">{user?.displayName || 'Admin'}</h2>
                 <p className="text-sm text-gray-500">{user?.email}</p>

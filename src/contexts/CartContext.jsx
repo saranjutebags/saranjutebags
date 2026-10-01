@@ -1,9 +1,21 @@
-import { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { db, isFirebaseActive } from '../firebase/config';
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { sendOrderStatusNotification } from '../services/notificationService';
 import { sendOrderStatusEmail } from '../services/emailService';
 import { useAuth } from './AuthContext';
+import {
+  fetchCachedDoc,
+  fetchCachedCollection,
+  invalidateCache,
+} from '../utils/firestoreCache';
+import {
+  setDocSafe,
+  hydrateDoc,
+  hydrateOrder,
+  deleteDocSafe,
+  friendlyFirestoreError,
+} from '../utils/chunkedFirestore';
 
 const CartContext = createContext();
 
@@ -72,24 +84,19 @@ export const CartProvider = ({ children }) => {
   const unsubOrdersRef = useRef(null);
   const unsubAddressesRef = useRef(null);
 
-  // Reduce order item images for Firestore (keep URL images, at most 1 base64 per item)
-  const sanitizeForFirestore = (obj) => {
-    if (Array.isArray(obj)) return obj.map(sanitizeForFirestore);
-    if (obj === null || typeof obj !== 'object') return obj;
-    const cleaned = {};
-    for (const [key, value] of Object.entries(obj)) {
-      if (value === undefined || value === null) continue;
-      if (key === 'images' && Array.isArray(value)) {
-        const urls = value.filter(img => img && !img.startsWith('data:'));
-        cleaned.images = urls.length > 0 ? urls : (value.length > 0 ? [value[0]] : []);
-      } else if (key === 'selectedImage' && typeof value === 'string' && value.startsWith('data:')) {
-        const urls = (obj.images || []).filter(img => img && !img.startsWith('data:'));
-        cleaned.selectedImage = urls[0] || value;
-      } else {
-        cleaned[key] = sanitizeForFirestore(value);
-      }
-    }
-    return cleaned;
+  // Rebuild chunked docs (e.g. coupons) so they display normally — the
+  // generic chunked-write layer stores oversized fields in subcollection
+  // docs and leaves '' placeholders in the main document.
+  const hydrateDocList = async (collectionName, docs) => {
+    if (!Array.isArray(docs)) return docs;
+    const chunked = docs.filter(d => d && d.__chunked);
+    if (chunked.length === 0) return docs;
+    const results = await Promise.all(
+      chunked.map(d => hydrateDoc(doc(db, collectionName, String(d.id)), d).catch(() => null))
+    );
+    const map = {};
+    chunked.forEach((d, i) => { if (results[i]) map[String(d.id)] = results[i]; });
+    return docs.map(d => map[String(d.id)] || d);
   };
 
   const orderSorter = (a, b) => {
@@ -139,13 +146,30 @@ export const CartProvider = ({ children }) => {
       (snap) => {
         if (snap.metadata.fromCache) return;
         const docs = [];
-        snap.forEach(d => docs.push(d.data()));
+        snap.forEach(d => docs.push({ ref: d.ref, data: d.data() }));
         docs.sort((a, b) => {
-          const ta = new Date(a.createdAt || a.date).getTime() || 0;
-          const tb = new Date(b.createdAt || b.date).getTime() || 0;
+          const ta = new Date(a.data.createdAt || a.data.date).getTime() || 0;
+          const tb = new Date(b.data.createdAt || b.data.date).getTime() || 0;
           return tb - ta;
         });
-        setOrders(docs);
+        const applyOrders = (hydratedMap) => {
+          setOrders(docs.map(x => hydratedMap[String(x.data.id || x.ref.id)] || x.data));
+        };
+        // Show the raw docs instantly; chunked fields rebuild a moment later.
+        applyOrders({});
+        const chunked = docs.filter(x => x.data.__chunked);
+        if (chunked.length === 0) {
+          return;
+        }
+        // Rebuild chunked orders so uploaded images/logos display normally.
+        Promise.all(chunked.map(x => hydrateDoc(x.ref, x.data).catch(() => null)))
+          .then(hydrated => {
+            const map = {};
+            chunked.forEach((x, i) => {
+              if (hydrated[i]) map[String(x.data.id || x.ref.id)] = hydrated[i];
+            });
+            applyOrders(map);
+          });
       },
       () => {
         setOrders([]);
@@ -173,105 +197,54 @@ export const CartProvider = ({ children }) => {
     };
   }, [uid]);
 
-  // ─── Global collections (coupons, pricing) ──────────────────────────────────
+  // ─── Global settings: cached one-time reads (no persistent listeners) ───────
+  // Coupons, pricing, and shipping settings rarely change — no realtime needed.
   useEffect(() => {
     if (!isFirebaseActive) return;
 
-    const unsubCoupons = onSnapshot(collection(db, 'coupons'), (snap) => {
-      if (snap.empty && !seededDefaults.current) {
-        seededDefaults.current = true;
-        const defaultCoupons = [
-          { id: 'welcome10', code: 'WELCOME10', label: 'Welcome Offer', discount: '10% OFF', active: true, shouldPopup: true },
-          { id: 'jute15', code: 'JUTE15', label: 'Bulk Bag Deal', discount: '15% OFF', active: false, shouldPopup: false },
-          { id: 'save50', code: 'SAVE50', label: 'Festival Savings', discount: 'Flat ₹50 OFF', active: true, shouldPopup: false },
-        ];
-        defaultCoupons.forEach(c => setDoc(doc(db, 'coupons', c.id), c).catch(() => undefined));
-      } else {
-        const docs = [];
-        snap.forEach(d => docs.push(d.data()));
-        setCoupons(docs);
-      }
-    }, (error) => {
-      console.warn('Coupons sync unavailable; using local fallback.', error?.message || error);
-      setCoupons(readJson(STORAGE_KEYS.coupons, []));
-    });
-
-    const unsubPricing = onSnapshot(doc(db, 'settings', 'pricing'), (snap) => {
-      if (snap.exists()) {
-        setPricingSettings(snap.data());
-      } else {
-        setDoc(doc(db, 'settings', 'pricing'), {
-          gstRate: 18,
-          shippingCharge: 40,
-          freeShippingThreshold: 999,
-        }).catch(() => undefined);
-      }
-    }, (error) => {
-      console.warn('Pricing settings sync unavailable; using cached fallback.', error?.message || error);
-      setPricingSettings(readJson(STORAGE_KEYS.pricingSettings, {
-        gstRate: 18,
-        shippingCharge: 40,
-        freeShippingThreshold: 999,
-      }));
-    });
-
-    const unsubWarehouse = onSnapshot(doc(db, 'settings', 'warehouse'), (snap) => {
-      if (snap.exists()) {
-        setWarehouse(snap.data());
-      } else {
-        const defaultWarehouse = {
-          lat: 17.433333,
-          lng: 78.383333,
-          placeId: '',
-          name: 'Main Warehouse',
-          phone: '+91 9876543210',
-          address: 'Mehdipatnam, Hyderabad, Telangana 500028',
-          pincode: '500028',
-          active: true,
-        };
-        // Immediately set state with defaults so checkout can proceed;
-        // the setDoc write will trigger a re-snapshot that sets it again.
-        setWarehouse(defaultWarehouse);
-        setDoc(doc(db, 'settings', 'warehouse'), defaultWarehouse).catch(() => undefined);
-      }
-    }, () => setWarehouse(null));
-
-    const unsubDomestic = onSnapshot(doc(db, 'settings', 'domesticShipping'), (snap) => {
-      if (snap.exists()) {
-        setDomesticShipping(snap.data());
-      } else {
-        setDoc(doc(db, 'settings', 'domesticShipping'), {
-          baseCharge: 40,
-          perKm: 8,
-          freeDeliveryAbove: 5000,
-        }).catch(() => undefined);
-      }
-    }, () => setDomesticShipping(null));
-
-    const unsubInternational = onSnapshot(doc(db, 'settings', 'internationalShipping'), (snap) => {
-      if (snap.exists()) {
-        setInternationalRates(snap.data().rates || []);
-      } else {
-        const defaultRates = [
-          { country: 'USA', code: 'US', ratePerKg: 420, currency: 'USD', minCharge: 1000, estimatedDays: '7-10' },
-          { country: 'UK', code: 'GB', ratePerKg: 390, currency: 'GBP', minCharge: 800, estimatedDays: '7-10' },
-          { country: 'UAE', code: 'AE', ratePerKg: 220, currency: 'AED', minCharge: 500, estimatedDays: '5-7' },
-          { country: 'Australia', code: 'AU', ratePerKg: 450, currency: 'AUD', minCharge: 1000, estimatedDays: '10-14' },
-          { country: 'Germany', code: 'DE', ratePerKg: 400, currency: 'EUR', minCharge: 900, estimatedDays: '7-10' },
-        ];
-        setInternationalRates(defaultRates);
-        setDoc(doc(db, 'settings', 'internationalShipping'), { rates: defaultRates }).catch(() => undefined);
-      }
-    }, () => setInternationalRates([]));
-
-    return () => {
-      unsubCoupons();
-      unsubPricing();
-      unsubWarehouse();
-      unsubDomestic();
-      unsubInternational();
+    let cancelled = false;
+    const defaultPricing = { gstRate: 18, shippingCharge: 40, freeShippingThreshold: 999 };
+    const defaultWarehouse = {
+      lat: 17.433333, lng: 78.383333, placeId: '', name: 'Main Warehouse',
+      phone: '+91 9876543210', address: 'Mehdipatnam, Hyderabad, Telangana 500028',
+      pincode: '500028', active: true,
     };
+    const defaultDomesticShipping = { baseCharge: 40, perKm: 8, freeDeliveryAbove: 5000 };
+    const defaultInternationalRates = [
+      { country: 'USA', code: 'US', ratePerKg: 420, currency: 'USD', minCharge: 1000, estimatedDays: '7-10' },
+      { country: 'UK', code: 'GB', ratePerKg: 390, currency: 'GBP', minCharge: 800, estimatedDays: '7-10' },
+      { country: 'UAE', code: 'AE', ratePerKg: 220, currency: 'AED', minCharge: 500, estimatedDays: '5-7' },
+      { country: 'Australia', code: 'AU', ratePerKg: 450, currency: 'AUD', minCharge: 1000, estimatedDays: '10-14' },
+      { country: 'Germany', code: 'DE', ratePerKg: 400, currency: 'EUR', minCharge: 900, estimatedDays: '7-10' },
+    ];
+    const defaultCoupons = [
+      { id: 'welcome10', code: 'WELCOME10', label: 'Welcome Offer', discount: '10% OFF', active: true, shouldPopup: true },
+      { id: 'jute15', code: 'JUTE15', label: 'Bulk Bag Deal', discount: '15% OFF', active: false, shouldPopup: false },
+      { id: 'save50', code: 'SAVE50', label: 'Festival Savings', discount: 'Flat ₹50 OFF', active: true, shouldPopup: false },
+    ];
+
+    const loadGlobalSettings = async () => {
+      const [pricing, warehouse, domestic, international, couponDocs] = await Promise.all([
+        fetchCachedDoc(db, 'settings', 'pricing',              { fallback: defaultPricing }),
+        fetchCachedDoc(db, 'settings', 'warehouse',            { fallback: defaultWarehouse }),
+        fetchCachedDoc(db, 'settings', 'domesticShipping',     { fallback: defaultDomesticShipping }),
+        fetchCachedDoc(db, 'settings', 'internationalShipping', { fallback: { rates: defaultInternationalRates } }),
+        fetchCachedCollection(db, 'coupons', { fallback: defaultCoupons }),
+      ]);
+
+      if (cancelled) return;
+
+      if (pricing)     setPricingSettings(pricing);
+      if (warehouse)   setWarehouse(warehouse);
+      if (domestic)    setDomesticShipping(domestic);
+      if (international) setInternationalRates(international.rates || defaultInternationalRates);
+      if (couponDocs)  setCoupons(await hydrateDocList('coupons', couponDocs));
+    };
+
+    loadGlobalSettings();
+    return () => { cancelled = true; };
   }, []);
+
 
   useEffect(() => { writeJson(STORAGE_KEYS.cart, cart); }, [cart]);
   useEffect(() => { writeJson(STORAGE_KEYS.wishlist, wishlist); }, [wishlist]);
@@ -335,6 +308,9 @@ export const CartProvider = ({ children }) => {
         totalStyleQuantity: selectedStyles ? selectedStyles.reduce((sum, s) => sum + (s.quantity || 1), 0) : quantity,
         effectivePrice: product.price // base price per unit
       };
+      // Cart items keep the light inline images only — full-resolution copies
+      // would bloat localStorage and every order document.
+      delete newItem.fullImages;
       return [...prev, newItem];
     });
     if (!blocked) {
@@ -456,10 +432,23 @@ export const CartProvider = ({ children }) => {
     };
 
     if (isFirebaseActive) {
-      const stripped = sanitizeForFirestore(nextOrder);
-      await setDoc(doc(db, 'users', uid, 'orders', order.id), stripped);
-      await setDoc(doc(db, 'orders', order.id), stripped).catch(err => console.error('Failed to mirror order to top-level collection:', err));
+      try {
+        // setDocSafe splits oversized fields (uploaded logos, images) into
+        // chunk subdocuments, so the 1MB document limit can never fail this
+        // write AFTER payment has been taken.
+        await setDocSafe(doc(db, 'users', uid, 'orders', order.id), nextOrder);
+        await setDocSafe(doc(db, 'orders', order.id), nextOrder).catch(err =>
+          console.error('Failed to mirror order to top-level collection:', err)
+        );
+      } catch (err) {
+        console.error('Failed to save order:', err);
+        throw new Error(friendlyFirestoreError(err, 'order'));
+      }
     }
+
+    // Show the order instantly while the realtime listener catches up
+    syncLocalOrders([nextOrder, ...orders.filter(o => o.id !== nextOrder.id)]);
+    setLatestOrder(nextOrder);
 
     triggerOrderNotification(nextOrder, nextOrder.status);
     sendOrderStatusEmail(nextOrder, nextOrder.status).catch(err => console.error('Email send error:', err));
@@ -503,12 +492,28 @@ export const CartProvider = ({ children }) => {
     const orderUserId = existing.userId || uid;
 
     if (isFirebaseActive) {
-      const stripped = sanitizeForFirestore(nextOrder);
-      if (orderUserId) {
-        await setDoc(doc(db, 'users', orderUserId, 'orders', orderId), stripped).catch(err => console.error('Failed to update user order:', err));
+      try {
+        // If the order was stored chunked, re-attach its chunked data first so
+        // the rewrite keeps the customer's uploaded images/logos intact.
+        let source = nextOrder;
+        if (existing.__chunked) {
+          const hydrated = await hydrateOrder(existing, orderUserId);
+          source = { ...hydrated, ...nextOrder };
+        }
+        await setDocSafe(doc(db, 'orders', orderId), source);
+        if (orderUserId) {
+          await setDocSafe(doc(db, 'users', orderUserId, 'orders', orderId), source).catch(err =>
+            console.error('Failed to update user order copy:', err)
+          );
+        }
+      } catch (err) {
+        console.error('Failed to update order:', err);
+        throw new Error(friendlyFirestoreError(err, 'update'));
       }
-      await setDoc(doc(db, 'orders', orderId), stripped);
     }
+
+    // Reflect the change instantly — admin and customer see it immediately
+    syncLocalOrders(orders.map(o => o.id === orderId ? nextOrder : o));
 
     setLatestOrder(prev => (prev && prev.id === orderId ? nextOrder : prev));
 
@@ -530,20 +535,23 @@ export const CartProvider = ({ children }) => {
     if (isFirebaseActive) {
       for (const orderId of orderIds) {
         const existing = orders.find(o => o.id === orderId);
-        if (existing?.userId) {
-          deleteDoc(doc(db, 'users', existing.userId, 'orders', orderId)).catch(() => undefined);
+        const orderUserId = existing?.userId || uid;
+        if (orderUserId) {
+          deleteDocSafe(doc(db, 'users', orderUserId, 'orders', orderId)).catch(() => undefined);
         }
-        await deleteDoc(doc(db, 'orders', orderId));
+        await deleteDocSafe(doc(db, 'orders', orderId));
       }
     }
+    syncLocalOrders(orders.filter(o => !orderIds.includes(o.id)));
   };
 
   // ─── Pricing ─────────────────────────────────────────────────────────────────
   const updatePricingSettings = (updates) => {
     if (isFirebaseActive) {
-      setDoc(doc(db, 'settings', 'pricing'), { ...pricingSettings, ...updates }).catch(() => {
-        const next = { ...pricingSettings, ...updates };
-        setPricingSettings(next);
+      const next = { ...pricingSettings, ...updates };
+      setPricingSettings(next);
+      invalidateCache('settings/pricing');
+      setDoc(doc(db, 'settings', 'pricing'), next).catch(() => {
         writeJson(STORAGE_KEYS.pricingSettings, next);
       });
     } else {
@@ -553,7 +561,10 @@ export const CartProvider = ({ children }) => {
 
   const updateWarehouse = (updates) => {
     if (isFirebaseActive) {
-      setDoc(doc(db, 'settings', 'warehouse'), { ...warehouse, ...updates }).catch(() => undefined);
+      const next = warehouse ? { ...warehouse, ...updates } : updates;
+      setWarehouse(next);
+      invalidateCache('settings/warehouse');
+      setDoc(doc(db, 'settings', 'warehouse'), next).catch(() => undefined);
     } else {
       setWarehouse(prev => prev ? { ...prev, ...updates } : updates);
     }
@@ -596,7 +607,7 @@ export const CartProvider = ({ children }) => {
     if (!uid) return;
     if (isFirebaseActive) {
       orders.forEach(o => {
-        deleteDoc(doc(db, 'users', uid, 'orders', o.id)).catch(() => undefined);
+        deleteDocSafe(doc(db, 'users', uid, 'orders', o.id)).catch(() => undefined);
       });
     } else {
       setOrders([]);
@@ -608,10 +619,10 @@ export const CartProvider = ({ children }) => {
     const id = coupon.id || `coupon-${Date.now()}`;
     const newCoupon = { ...coupon, id };
     if (isFirebaseActive) {
-      setDoc(doc(db, 'coupons', id), newCoupon).catch(() => syncLocalCoupons([newCoupon, ...coupons.filter(c => c.id !== id)]));
-    } else {
-      setCoupons(prev => [newCoupon, ...prev]);
+      invalidateCache('coupons');
+      setDocSafe(doc(db, 'coupons', id), newCoupon).catch(() => syncLocalCoupons([newCoupon, ...coupons.filter(c => c.id !== id)]));
     }
+    setCoupons(prev => [newCoupon, ...prev]);
   };
 
   const updateCoupon = (couponId, updates) => {
@@ -619,18 +630,16 @@ export const CartProvider = ({ children }) => {
     if (!existing) return;
     const newCoupon = { ...existing, ...updates };
     if (isFirebaseActive) {
-      setDoc(doc(db, 'coupons', couponId), newCoupon).catch(() => syncLocalCoupons(coupons.map(c => c.id === couponId ? newCoupon : c)));
-    } else {
-      setCoupons(prev => prev.map(c => c.id === couponId ? newCoupon : c));
+      setDocSafe(doc(db, 'coupons', couponId), newCoupon).catch(() => syncLocalCoupons(coupons.map(c => c.id === couponId ? newCoupon : c)));
     }
+    setCoupons(prev => prev.map(c => c.id === couponId ? newCoupon : c));
   };
 
   const deleteCoupon = (couponId) => {
     if (isFirebaseActive) {
-      deleteDoc(doc(db, 'coupons', couponId)).catch(() => syncLocalCoupons(coupons.filter(c => c.id !== couponId)));
-    } else {
-      setCoupons(prev => prev.filter(c => c.id !== couponId));
+      deleteDocSafe(doc(db, 'coupons', couponId)).catch(() => syncLocalCoupons(coupons.filter(c => c.id !== couponId)));
     }
+    setCoupons(prev => prev.filter(c => c.id !== couponId));
   };
 
   const toggleCoupon = (couponId) => {
@@ -647,7 +656,11 @@ export const CartProvider = ({ children }) => {
   const toggleWishlist = (product) => {
     setWishlist(prev => {
       const existing = prev.find(item => item.id === product.id);
-      return existing ? prev.filter(item => item.id !== product.id) : [...prev, product];
+      if (existing) return prev.filter(item => item.id !== product.id);
+      // Store the light copy (inline thumbnails) — not the full-resolution images.
+      const light = { ...product };
+      delete light.fullImages;
+      return [...prev, light];
     });
   };
 

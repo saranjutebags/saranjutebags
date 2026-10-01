@@ -84,7 +84,7 @@ const SEOHead = ({
       <meta name="twitter:image" content={ogImage} />
 
       {/* Theme & Mobile */}
-      <meta name="theme-color" content="#059669" />
+      <meta name="theme-color" content="#1B4D3E" />
 
       {/* JSON-LD Structured Data */}
       {schemasToRender.map((s, idx) => (

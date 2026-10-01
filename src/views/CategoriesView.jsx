@@ -55,7 +55,7 @@ const CategoriesView = () => {
           /* ── Empty state ── */
           <div className="text-center py-24">
             <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-5">
-              <Tags className="w-10 h-10 text-emerald-400" />
+              <Tags className="w-10 h-10 text-[#1B4D3E]" />
             </div>
             <h3 className="text-2xl font-bold text-gray-800 mb-2">No categories yet</h3>
             <p className="text-gray-500 text-sm max-w-sm mx-auto mb-6">
@@ -96,7 +96,7 @@ const CategoriesView = () => {
                         />
                       ) : (
                         <div className="w-20 h-20 bg-emerald-100 rounded-2xl flex items-center justify-center">
-                          <Package className="w-10 h-10 text-emerald-400" />
+                          <Package className="w-10 h-10 text-[#1B4D3E]" />
                         </div>
                       )}
                     </div>

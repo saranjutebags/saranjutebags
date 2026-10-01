@@ -81,7 +81,7 @@ const LandingView = () => {
 
       {/* ── Hero ──────────────────────────────────────────────────── */}
       <section className="relative min-h-[90vh] flex items-center overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-emerald-600 via-green-500 to-emerald-800" />
+        <div className="absolute inset-0 bg-gradient-to-br from-[#0C211C] via-[#1B4D3E] to-[#112F27]" />
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.3),transparent_40%)]" />
 
         {/* Location badge */}
@@ -112,10 +112,10 @@ const LandingView = () => {
                 Saran Jute Bags — trusted partner for premium jute, cotton, and canvas bags. Established 2010, delivering quality worldwide.
               </p>
               <div className="flex flex-col sm:flex-row gap-4">
-                <Link to="/products" className="btn-primary bg-white text-emerald-700 hover:bg-yellow-300 hover:text-emerald-800 px-8 py-4 text-lg font-bold shadow-2xl inline-flex items-center justify-center gap-2">
+                <Link to="/products" className="bg-[#1B4D3E] text-white hover:bg-[#3E7A63] hover:scale-105 px-8 py-4 text-lg font-bold shadow-2xl inline-flex items-center justify-center gap-2 rounded-xl transition-all duration-300">
                   Shop Now <ArrowRight className="w-5 h-5" />
                 </Link>
-                <button onClick={() => navigate('/categories')} className="btn-secondary border-white text-white hover:bg-white hover:text-emerald-700 px-8 py-4 text-lg font-bold">
+                <button onClick={() => navigate('/categories')} className="border-2 border-white/80 text-white hover:bg-[#3E7A63] hover:border-[#3E7A63] hover:scale-105 px-8 py-4 text-lg font-bold rounded-xl transition-all duration-300">
                   Explore Collection
                 </button>
               </div>
@@ -253,7 +253,7 @@ const LandingView = () => {
                           <img src={product.images[0]} alt={product.name} className="h-full w-full object-contain" />
                         ) : (
                           <div className="w-20 h-20 bg-emerald-100 rounded-2xl flex items-center justify-center">
-                            <Package className="w-10 h-10 text-emerald-400" />
+                            <Package className="w-10 h-10 text-[#1B4D3E]" />
                           </div>
                         )}
                       </Link>
@@ -298,7 +298,7 @@ const LandingView = () => {
 
 
       {/* ── CTA Banner ────────────────────────────────────────────── */}
-      <section className="py-20 bg-gradient-to-r from-emerald-600 to-green-600">
+      <section className="py-20 bg-gradient-to-r from-[#1B4D3E] to-[#3E7A63]">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <Globe className="w-14 h-14 text-white mx-auto mb-6" />
           <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">Eco-Friendly Brand Promotion Made Easy</h2>
@@ -306,10 +306,10 @@ const LandingView = () => {
             Promote your brand and increase sales 2× with customised products. Worldwide delivery available.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <button onClick={() => navigate('/products')} className="btn-primary bg-white text-emerald-700 hover:bg-yellow-300 hover:text-emerald-800 px-8 py-4 text-lg font-bold">
+            <button onClick={() => navigate('/products')} className="bg-white text-[#1B4D3E] hover:bg-[#3E7A63] hover:text-white hover:scale-105 px-8 py-4 text-lg font-bold rounded-xl transition-all duration-300 shadow-lg">
               Order Now
             </button>
-            <button onClick={() => navigate('/contact')} className="btn-secondary border-white text-white hover:bg-white hover:text-emerald-700 px-8 py-4 text-lg font-bold">
+            <button onClick={() => navigate('/contact')} className="border-2 border-white text-white hover:bg-[#3E7A63] hover:border-[#3E7A63] hover:scale-105 px-8 py-4 text-lg font-bold rounded-xl transition-all duration-300">
               Contact Us
             </button>
           </div>
@@ -333,7 +333,7 @@ const LandingView = () => {
                 transition={{ delay: index * 0.08 }}
                 className="glass rounded-2xl p-6 text-center border border-emerald-100"
               >
-                <div className="w-14 h-14 bg-gradient-to-br from-emerald-500 to-green-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <div className="w-14 h-14 bg-gradient-to-br from-[#1B4D3E] to-[#3E7A63] rounded-2xl flex items-center justify-center mx-auto mb-4">
                   <item.icon className="w-7 h-7 text-white" />
                 </div>
                 <h3 className="text-lg font-bold text-gray-800 mb-2">{item.title}</h3>
@@ -431,7 +431,7 @@ const LandingView = () => {
               <h4 className="font-bold mb-4">Quick Links</h4>
               <ul className="space-y-2 text-sm">
                 {[['Home', '/'], ['Products', '/products'], ['Categories', '/categories'], ['About', '/about'], ['Contact', '/contact']].map(([label, path]) => (
-                  <li key={label}><Link to={path} className="text-gray-400 hover:text-emerald-400 transition-colors">{label}</Link></li>
+                  <li key={label}><Link to={path} className="text-gray-400 hover:text-[#1B4D3E] transition-colors">{label}</Link></li>
                 ))}
               </ul>
             </div>
@@ -439,7 +439,7 @@ const LandingView = () => {
               <h4 className="font-bold mb-4">Categories</h4>
               <ul className="space-y-2 text-sm">
                 {visibleCategories.slice(0, 5).map(cat => (
-                  <li key={cat.id}><Link to="/products" className="text-gray-400 hover:text-emerald-400 transition-colors">{cat.name}</Link></li>
+                  <li key={cat.id}><Link to="/products" className="text-gray-400 hover:text-[#1B4D3E] transition-colors">{cat.name}</Link></li>
                 ))}
                 {visibleCategories.length === 0 && <li className="text-gray-600 text-xs">Categories loading…</li>}
               </ul>
@@ -456,11 +456,11 @@ const LandingView = () => {
           <div className="border-t border-gray-800 pt-6 flex flex-col md:flex-row items-center justify-between gap-3">
             <p className="text-gray-500 text-sm">&copy; 2026 Saran Jute Bags. All rights reserved.</p>
             <div className="flex gap-4 text-sm">
-              <Link to="/privacy" className="text-gray-400 hover:text-emerald-400 transition-colors">Privacy Policy</Link>
-              <Link to="/terms" className="text-gray-400 hover:text-emerald-400 transition-colors">Terms of Service</Link>
+              <Link to="/privacy" className="text-gray-400 hover:text-[#1B4D3E] transition-colors">Privacy Policy</Link>
+              <Link to="/terms" className="text-gray-400 hover:text-[#1B4D3E] transition-colors">Terms of Service</Link>
             </div>
             <p className="text-gray-500 text-sm">
-              Developed by <a href="https://csytech.vercel.app" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300">@Csy Tech Solutions</a>
+              Developed by <a href="https://csytech.vercel.app" target="_blank" rel="noopener noreferrer" className="text-[#1B4D3E] hover:text-[#3E7A63]">@Csy Tech Solutions</a>
             </p>
           </div>
         </div>

@@ -47,6 +47,26 @@ const buildProfileFromFirebaseUser = (firebaseUser, fallbackRole = 'customer') =
   return profile;
 };
 
+// Translate Firebase auth codes into plain messages users can understand.
+// Firebase's default text (e.g. "Firebase: Error (auth/invalid-credential).")
+// must never be shown to users.
+const friendlyAuthError = (code) => {
+  const known = {
+    'auth/invalid-credential': 'Incorrect email or password. Please check and try again.',
+    'auth/user-not-found': 'No account found with this email. Please sign up first.',
+    'auth/wrong-password': 'Incorrect password. Please try again.',
+    'auth/email-already-in-use': 'This email is already registered. Please sign in instead.',
+    'auth/weak-password': 'Password is too weak. Please use at least 6 characters.',
+    'auth/invalid-email': 'Please enter a valid email address.',
+    'auth/too-many-requests': 'Too many attempts. Please wait a moment and try again.',
+    'auth/network-request-failed': 'Network error. Please check your internet connection.',
+    'auth/popup-closed-by-user': 'The sign-in window was closed. Please try again.',
+    'auth/popup-blocked': 'Pop-up blocked by your browser. Please allow pop-ups and try again.',
+    'auth/operation-not-allowed': 'This sign-in method is not enabled. Please contact support.',
+  };
+  return known[code] || 'Unable to complete that action right now. Please try again.';
+};
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -63,6 +83,13 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     let isActive = true;
 
+    // Safety net: never leave the UI stuck on the "Loading dashboard…" state
+    // if the auth SDK is slow to initialize. Auth state is still applied
+    // whenever it resolves, even after this timeout.
+    const safetyTimer = setTimeout(() => {
+      if (isActive) setLoading(false);
+    }, 8000);
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!isActive) {
         return;
@@ -71,25 +98,31 @@ export const AuthProvider = ({ children }) => {
       if (currentUser) {
         setUser(currentUser);
 
-        try {
-          const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-          if (!isActive) {
-            return;
-          }
+        // Race the profile read against a timeout so a slow Firestore
+        // connection can never freeze the dashboard on loading.
+        const profileSnap = await Promise.race([
+          getDoc(doc(db, 'users', currentUser.uid)).catch(() => null),
+          new Promise((resolve) => setTimeout(() => resolve(null), 7000)),
+        ]);
 
-          const profile = userDoc.exists()
-            ? userDoc.data()
-            : buildProfileFromFirebaseUser(currentUser);
+        if (!isActive) {
+          return;
+        }
 
+        if (profileSnap && profileSnap.exists()) {
+          const profile = profileSnap.data();
           if (profile && isEmailAdmin(currentUser.email)) {
             profile.role = 'admin';
           }
-
           setUserData(profile);
           saveProfileSession(profile);
-        } catch (error) {
-          console.warn('Firestore profile sync unavailable, using cached profile fallback:', error?.message || error);
-          const fallbackProfile = buildProfileFromFirebaseUser(currentUser);
+        } else {
+          // Fall back to the last saved session, or build one from the
+          // Firebase user — the app must never block on a profile read.
+          const stored = readProfileSession();
+          const fallbackProfile =
+            (stored && stored.uid === currentUser.uid && stored) ||
+            buildProfileFromFirebaseUser(currentUser);
           setUserData(fallbackProfile);
           saveProfileSession(fallbackProfile);
         }
@@ -104,6 +137,7 @@ export const AuthProvider = ({ children }) => {
 
     return () => {
       isActive = false;
+      clearTimeout(safetyTimer);
       unsubscribe();
     };
   }, []);
@@ -137,7 +171,7 @@ export const AuthProvider = ({ children }) => {
         return { success: true, role: fallbackProfile.role, user: userCredential.user };
       }
     } catch (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: friendlyAuthError(error.code) };
     }
   };
 
@@ -167,7 +201,7 @@ export const AuthProvider = ({ children }) => {
 
       return { success: true, role, user: userCredential.user };
     } catch (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: friendlyAuthError(error.code) };
     }
   };
 
@@ -207,7 +241,7 @@ export const AuthProvider = ({ children }) => {
 
       return { success: true, role: profile.role, user: result.user };
     } catch (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: friendlyAuthError(error.code) };
     }
   };
 

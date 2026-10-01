@@ -149,10 +149,10 @@ export const sendOrderStatusEmail = async (order, status) => {
     totals_html: `
 <table cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse; margin-top:12px;">
   <tr><td style="padding:4px 0;font-size:14px;color:#4b5563;">Subtotal</td><td style="padding:4px 0;font-size:14px;color:#1f2937;text-align:right;">₹${Number(order.subtotal || 0).toFixed(2)}</td></tr>
-  ${order.discountAmount ? `<tr><td style="padding:4px 0;font-size:14px;color:#4b5563;">Discount</td><td style="padding:4px 0;font-size:14px;color:#059669;text-align:right;">-₹${Number(order.discountAmount).toFixed(2)}</td></tr>` : ''}
+  ${order.discountAmount ? `<tr><td style="padding:4px 0;font-size:14px;color:#4b5563;">Discount</td><td style="padding:4px 0;font-size:14px;color:#1B4D3E;text-align:right;">-₹${Number(order.discountAmount).toFixed(2)}</td></tr>` : ''}
   <tr><td style="padding:4px 0;font-size:14px;color:#4b5563;">Shipping</td><td style="padding:4px 0;font-size:14px;color:#1f2937;text-align:right;">${order.shippingCharge === 0 ? 'Free' : `₹${Number(order.shippingCharge || 0).toFixed(2)}`}</td></tr>
   <tr><td style="padding:4px 0;font-size:14px;color:#4b5563;">GST (${order.gstRate || 18}%)</td><td style="padding:4px 0;font-size:14px;color:#1f2937;text-align:right;">₹${Number(order.gstAmount || 0).toFixed(2)}</td></tr>
-  <tr><td style="padding:8px 0 0 0;font-size:16px;font-weight:bold;color:#1f2937;border-top:2px solid #e5e7eb;">Total</td><td style="padding:8px 0 0 0;font-size:16px;font-weight:bold;color:#059669;text-align:right;border-top:2px solid #e5e7eb;">₹${Number(order.grandTotal || order.total || 0).toFixed(2)}</td></tr>
+  <tr><td style="padding:8px 0 0 0;font-size:16px;font-weight:bold;color:#1f2937;border-top:2px solid #e5e7eb;">Total</td><td style="padding:8px 0 0 0;font-size:16px;font-weight:bold;color:#1B4D3E;text-align:right;border-top:2px solid #e5e7eb;">₹${Number(order.grandTotal || order.total || 0).toFixed(2)}</td></tr>
   <tr><td style="padding:4px 0;font-size:13px;color:#6b7280;">Payment</td><td style="padding:4px 0;font-size:13px;color:#374151;text-align:right;">${order.paymentMethod || 'COD'}${order.paidAmount ? ` (Paid: ₹${Number(order.paidAmount).toFixed(2)})` : ''}</td></tr>
 </table>`,
   };

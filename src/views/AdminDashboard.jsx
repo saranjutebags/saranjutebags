@@ -8,8 +8,9 @@ import { useAdmin } from '../contexts/AdminContext';
 import { db, isFirebaseActive } from '../firebase/config';
 import { doc, setDoc, deleteDoc, collection, onSnapshot } from 'firebase/firestore';
 import { getAuth, updatePassword } from 'firebase/auth';
-import { convertFileToBase64, validateImageFile, compressImage } from '../utils/imageUtils';
+import { convertFileToBase64, validateImageFile, compressImage, compressMultipleImagesFast, compressImageFast, recompressDataUrl } from '../utils/imageUtils';
 import { getItemImage } from '../utils/orderImageUtils';
+import { hydrateDoc } from '../utils/chunkedFirestore';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { isDelhiveryActive, fetchWaybill, createShipment, requestPickup, calculateShippingCharge, registerWarehouse } from '../services/delhivery';
@@ -57,10 +58,10 @@ import OfflineBillsSheet from '../components/OfflineBillsSheet';
 
 const AdminDashboard = () => {
   const { user, signOut } = useAuth();
-  const { products, categories, addProduct, updateProduct, deleteProduct, addCategory, updateCategory, deleteCategory, toggleCategoryVisibility, deleteProductReview, toggleReviewVisibility, updateProductStock } = useProducts();
+  const { products, categories, addProduct, updateProduct, deleteProduct, addCategory, updateCategory, deleteCategory, toggleCategoryVisibility, deleteProductReview, toggleReviewVisibility, updateProductStock, fetchSingleProduct, optimizeAllProducts } = useProducts();
   const { orders, updateOrder, deleteOrders } = useCart();
   const { pricingSettings, updatePricingSettings, warehouse, domesticShipping, internationalRates, updateWarehouse, updateDomesticShipping, updateInternationalShipping } = useCart();
-  const { companySettings, updateCompanySettings, banners, addBanner, updateBanner, deleteBanner, scrollingTexts, addScrollingText, updateScrollingText, deleteScrollingText, activityLogs, addActivityLog, testProductSettings, updateTestProductSettings } = useAdmin();
+  const { companySettings, updateCompanySettings, banners, addBanner, updateBanner, deleteBanner, scrollingTexts, addScrollingText, updateScrollingText, deleteScrollingText, activityLogs, addActivityLog, testProductSettings, updateTestProductSettings, subscribeAdminRealtime } = useAdmin();
   const navigate = useNavigate();
   
   const [activeTab, setActiveTab] = useState('overview');
@@ -73,6 +74,9 @@ const AdminDashboard = () => {
   const [analyticsFrom, setAnalyticsFrom] = useState('');
   const [analyticsTo, setAnalyticsTo] = useState('');
   const [loading, setLoading] = useState(false);
+  const savingRef = useRef(false); // guards against double-click duplicate products
+  const [saveProgress, setSaveProgress] = useState({ active: false, label: '', percent: 0 });
+  const [optimizeProgress, setOptimizeProgress] = useState({ active: false, label: '' });
   const [message, setMessage] = useState('');
   const [editingProduct, setEditingProduct] = useState(null);
   const [productForm, setProductForm] = useState({
@@ -115,13 +119,27 @@ const [productImages, setProductImages] = useState([]);
       (snap) => {
         if (snap.metadata.fromCache) return;
         const docs = [];
-        snap.forEach(d => docs.push(d.data()));
+        snap.forEach(d => docs.push({ ref: d.ref, data: d.data() }));
         docs.sort((a, b) => {
-          const ta = new Date(a.createdAt || a.date).getTime() || 0;
-          const tb = new Date(b.createdAt || b.date).getTime() || 0;
+          const ta = new Date(a.data.createdAt || a.data.date).getTime() || 0;
+          const tb = new Date(b.data.createdAt || b.data.date).getTime() || 0;
           return tb - ta;
         });
-        setAllOrders(docs);
+        const applyOrders = (hydratedMap) => {
+          setAllOrders(docs.map(x => hydratedMap[String(x.data.id || x.ref.id)] || x.data));
+        };
+        // Show orders instantly — chunked fields (images/logos) rebuild right after
+        applyOrders({});
+        const chunked = docs.filter(x => x.data.__chunked);
+        if (chunked.length === 0) return;
+        Promise.all(chunked.map(x => hydrateDoc(x.ref, x.data).catch(() => null)))
+          .then(hydrated => {
+            const map = {};
+            chunked.forEach((x, i) => {
+              if (hydrated[i]) map[String(x.data.id || x.ref.id)] = hydrated[i];
+            });
+            applyOrders(map);
+          });
       },
       () => {
         setAllOrders([]);
@@ -200,9 +218,9 @@ const [productImages, setProductImages] = useState([]);
 
   // Theme
   const [themeColors, setThemeColors] = useState({
-    primary: companySettings?.primaryColor || '#059669',
-    secondary: companySettings?.secondaryColor || '#10b981',
-    surface: companySettings?.surfaceColor || '#ecfdf5',
+    primary: companySettings?.primaryColor || '#1B4D3E',
+    secondary: companySettings?.secondaryColor || '#3E7A63',
+    surface: companySettings?.surfaceColor || '#EEF4F1',
   });
 
   // Scrolling text form state
@@ -239,16 +257,27 @@ const [productImages, setProductImages] = useState([]);
 
   // Load data from Firestore (banners come from AdminContext, not a local listener)
   useEffect(() => {
+    const hydrateList = (collectionName, docs, apply) => {
+      const chunked = docs.filter(d => d.__chunked);
+      if (chunked.length === 0) { apply(docs); return; }
+      Promise.all(chunked.map(d => hydrateDoc(doc(db, collectionName, String(d.id)), d).catch(() => null)))
+        .then(hydrated => {
+          const map = {};
+          chunked.forEach((d, i) => { if (hydrated[i]) map[String(d.id)] = hydrated[i]; });
+          apply(docs.map(d => map[String(d.id)] || d));
+        });
+    };
+
     const unsubPopups = onSnapshot(collection(db, 'popups'), (snap) => {
       const docs = [];
       snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
-      setPopups(docs);
+      hydrateList('popups', docs, setPopups);
     });
 
     const unsubCoupons = onSnapshot(collection(db, 'coupons'), (snap) => {
       const docs = [];
       snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
-      setCoupons(docs);
+      hydrateList('coupons', docs, setCoupons);
     });
 
     return () => {
@@ -256,6 +285,15 @@ const [productImages, setProductImages] = useState([]);
       unsubCoupons();
     };
   }, []);
+
+  // ─── Admin realtime sync ─────────────────────────────────────────────────────
+  // Attach the shared admin listeners so company settings, banners, popups,
+  // reviews, notifications and scrolling texts update live in this dashboard
+  // (and in any other open admin session) without a page reload.
+  useEffect(() => {
+    const unsub = subscribeAdminRealtime();
+    return () => { if (unsub) unsub(); };
+  }, [subscribeAdminRealtime]);
 
   // Order notification system
   useEffect(() => {
@@ -333,10 +371,10 @@ const [productImages, setProductImages] = useState([]);
     if (!files || files.length === 0) return;
 
     try {
-      const newImages = [];
       const maxTotalImages = 6;
+      const validFiles = [];
       for (const file of files) {
-        if (productImages.length + newImages.length >= maxTotalImages) {
+        if (productImages.length + validFiles.length >= maxTotalImages) {
           showMessage(`Maximum ${maxTotalImages} images allowed`, 'error');
           break;
         }
@@ -345,13 +383,16 @@ const [productImages, setProductImages] = useState([]);
           showMessage(validation.error, 'error');
           continue;
         }
-        const compressed = await compressImage(file, 0.6, 800);
-        const base64 = await convertFileToBase64(compressed);
-        newImages.push(base64);
+        validFiles.push(file);
       }
-      
-      setProductImages(prev => [...prev, ...newImages]);
-      showMessage(`${newImages.length} image(s) uploaded successfully`);
+
+      if (validFiles.length > 0) {
+        showMessage(`Processing ${validFiles.length} image(s)...`);
+        const newImages = await compressMultipleImagesFast(validFiles, 0.7, 900);
+        const successfulImages = newImages.filter(Boolean);
+        setProductImages(prev => [...prev, ...successfulImages]);
+        showMessage(`${successfulImages.length} image(s) processed & added successfully`);
+      }
     } catch (error) {
       console.error('Image upload error:', error);
       showMessage('Failed to upload image(s)', 'error');
@@ -359,13 +400,44 @@ const [productImages, setProductImages] = useState([]);
   };
 
   const handleSaveProduct = async () => {
+    if (loading || savingRef.current) return; // prevent duplicate products on double-click
     if (!productForm.name.trim()) { showMessage('Product name is required', 'error'); return; }
     if (!productForm.price) { showMessage('Product price is required', 'error'); return; }
     if (!productForm.category) { showMessage('Please select a category', 'error'); return; }
+
+    savingRef.current = true;
     setLoading(true);
     try {
       const urlImages = productForm.images ? productForm.images.split(',').map(img => img.trim()).filter(Boolean) : [];
-      const allImages = [...productImages, ...urlImages];
+      const uploadedImages = productImages.filter(Boolean); // compressed data: URLs
+
+      // ── Firestore-only image handling (light document store) ────────────────
+      // The product doc keeps SMALL thumbnails inline so the storefront list
+      // loads instantly. Full-resolution uploads are split into image chunk
+      // documents under products/{id}/images and re-attached when the product
+      // is opened — nothing is dropped and no write can exceed the 1MB limit.
+      let thumbImages = uploadedImages;
+      if (uploadedImages.length > 0) {
+        setSaveProgress({ active: true, label: 'Optimizing images…', percent: 15 });
+        thumbImages = await Promise.all(
+          uploadedImages.map(img => recompressDataUrl(img, { quality: 0.55, maxWidth: 300 }))
+        );
+      }
+      const finalImages = [...thumbImages, ...urlImages];
+
+      // Safety net: even the thumbnail payload must fit comfortably in the doc.
+      const MAX_DOC_CHARS = 800000;
+      const docSize = JSON.stringify({
+        ...productForm,
+        price: Number(productForm.price) || 0,
+        stock: Number(productForm.stock) || 0,
+        images: finalImages,
+      }).length;
+      if (docSize > MAX_DOC_CHARS) {
+        showMessage('Images are too large for the product. Use fewer images, image URLs, or smaller files.', 'error');
+        return;
+      }
+
       const productData = {
         ...productForm,
         price: Number(productForm.price) || 0,
@@ -373,7 +445,8 @@ const [productImages, setProductImages] = useState([]);
         discount: productForm.showDiscount ? (Number(productForm.discount) || 0) : 0,
         showDiscount: productForm.showDiscount,
         stock: Number(productForm.stock) || 0,
-        images: allImages,
+        images: finalImages,
+        fullImages: uploadedImages, // full-resolution copies → stored in chunks
         visible: true,
         featured: productForm.featured,
         archived: productForm.archived,
@@ -381,6 +454,13 @@ const [productImages, setProductImages] = useState([]);
         newArrival: false,
         createdAt: editingProduct?.createdAt || new Date().toISOString(),
       };
+
+      // Success is reported only after the write (doc + image chunks) finishes.
+      setSaveProgress({
+        active: true,
+        label: editingProduct ? 'Saving changes…' : 'Saving product…',
+        percent: 60,
+      });
 
       if (editingProduct) {
         await updateProduct(editingProduct.id, productData);
@@ -392,6 +472,7 @@ const [productImages, setProductImages] = useState([]);
         showMessage('Product added successfully');
       }
 
+      setSaveProgress({ active: false, label: '', percent: 100 });
       setEditingProduct(null);
       setProductImages([]);
       setProductForm({
@@ -413,36 +494,68 @@ const [productImages, setProductImages] = useState([]);
       showMessage('Failed to save product', 'error');
       console.error(error);
     } finally {
+      savingRef.current = false;
       setLoading(false);
+      setSaveProgress(prev => ({ ...prev, active: false }));
     }
   };
 
-  const handleEditProduct = (product) => {
+  const handleEditProduct = async (product) => {
     setEditingProduct(product);
-    const imgs = product.images || [];
+    // Products that store full-resolution images in chunks are hydrated first
+    // so re-saving keeps the original quality.
+    let source = product;
+    if (product.imagesInChunks && !product.fullImages) {
+      const hydrated = await fetchSingleProduct(String(product.id) || product.slug);
+      if (hydrated) source = hydrated;
+    }
+    const imgs = source.fullImages || source.images || [];
     const uploaded = imgs.filter(img => img.startsWith('data:'));
     const urls = imgs.filter(img => !img.startsWith('data:'));
     setProductImages(uploaded);
     setProductForm({
-      name: product.name || '',
-      price: product.price || '',
-      originalPrice: product.originalPrice || '',
-      discount: product.discount || '',
-      discountType: product.discountType || 'percentage',
-      showDiscount: product.showDiscount !== undefined ? product.showDiscount : Boolean(product.originalPrice),
-      material: product.material || '',
-      stock: product.stock || 0,
-      inStock: product.inStock !== false && (product.stock || 0) > 0,
-      weightPerPiece: product.weightPerPiece || '',
-      category: product.category || '',
-      description: product.description || '',
+      name: source.name || '',
+      price: source.price || '',
+      originalPrice: source.originalPrice || '',
+      discount: source.discount || '',
+      discountType: source.discountType || 'percentage',
+      showDiscount: source.showDiscount !== undefined ? source.showDiscount : Boolean(source.originalPrice),
+      material: source.material || '',
+      stock: source.stock || 0,
+      inStock: source.inStock !== false && (source.stock || 0) > 0,
+      weightPerPiece: source.weightPerPiece || '',
+      category: source.category || '',
+      description: source.description || '',
       images: urls.join(','),
-      sku: product.sku || '',
-      featured: product.featured || false,
-      archived: product.archived || false,
-      dimensions: product.dimensions || { length: '', width: '', height: '', unit: 'cm' },
-      styles: product.styles || [],
+      sku: source.sku || '',
+      featured: source.featured || false,
+      archived: source.archived || false,
+      dimensions: source.dimensions || { length: '', width: '', height: '', unit: 'cm' },
+      styles: source.styles || [],
     });
+  };
+
+  // One-click image migration for the whole catalog: moves large base64
+  // images out of product docs into image chunks so every storefront page
+  // loads fast. Runs sequentially with live progress.
+  const handleOptimizeAllImages = async () => {
+    if (optimizeProgress.active) return;
+    setOptimizeProgress({ active: true, label: 'Scanning products…' });
+    try {
+      const { optimized, total } = await optimizeAllProducts((done, totalCount, name) => {
+        setOptimizeProgress({ active: true, label: `Optimizing ${done}/${totalCount} — ${name}` });
+      });
+      showMessage(
+        optimized > 0
+          ? `Images optimized for ${optimized} product(s) — the store now loads much faster`
+          : 'All product images are already optimized'
+      );
+    } catch (err) {
+      console.error(err);
+      showMessage('Failed to optimize product images', 'error');
+    } finally {
+      setOptimizeProgress({ active: false, label: '' });
+    }
   };
 
   const handleDeleteProduct = async (id) => {
@@ -1421,7 +1534,11 @@ const [productImages, setProductImages] = useState([]);
             className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
           >
             <Save className="w-4 h-4" />
-            {loading ? 'Saving...' : editingProduct ? 'Update Product' : 'Add Product'}
+            {loading
+              ? (saveProgress.active && saveProgress.label
+                  ? `${saveProgress.label}${saveProgress.percent > 0 ? ` ${saveProgress.percent}%` : ''}`
+                  : 'Saving...')
+              : editingProduct ? 'Update Product' : 'Add Product'}
           </button>
           {editingProduct && (
             <button
@@ -1439,6 +1556,21 @@ const [productImages, setProductImages] = useState([]);
       </Card>
 
       <Card title="Product List">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <p className="text-sm text-gray-500 max-w-xl">
+            {optimizeProgress.active
+              ? optimizeProgress.label
+              : 'Run "Optimize Images" once to move large product images out of the list — pages then load in under a second for every customer.'}
+          </p>
+          <button
+            onClick={handleOptimizeAllImages}
+            disabled={optimizeProgress.active}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium"
+          >
+            <ImageIcon className="w-4 h-4" />
+            {optimizeProgress.active ? 'Optimizing…' : 'Optimize Product Images'}
+          </button>
+        </div>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -3088,7 +3220,7 @@ const [productImages, setProductImages] = useState([]);
   };
 
   const themePresets = [
-    { name: 'Default Green', primary: '#059669', secondary: '#10b981', surface: '#ecfdf5' },
+    { name: 'Default Evergreen', primary: '#1B4D3E', secondary: '#3E7A63', surface: '#EEF4F1' },
     { name: 'Ocean Blue', primary: '#2563eb', secondary: '#3b82f6', surface: '#eff6ff' },
     { name: 'Royal Purple', primary: '#7c3aed', secondary: '#8b5cf6', surface: '#f5f3ff' },
     { name: 'Warm Orange', primary: '#ea580c', secondary: '#f97316', surface: '#fff7ed' },
@@ -3117,7 +3249,7 @@ const [productImages, setProductImages] = useState([]);
         </div>
         <div className="mt-4 flex gap-3">
           <button
-            onClick={() => setThemeColors({ primary: '#059669', secondary: '#10b981', surface: '#ecfdf5' })}
+            onClick={() => setThemeColors({ primary: '#1B4D3E', secondary: '#3E7A63', surface: '#EEF4F1' })}
             className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm"
           >
             Reset to Default
@@ -3294,7 +3426,7 @@ const [productImages, setProductImages] = useState([]);
                 <motion.div
                   animate={{ scale: [1, 1.1, 1] }}
                   transition={{ repeat: Infinity, duration: 2 }}
-                  className="w-20 h-20 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4"
+                  className="w-20 h-20 bg-gradient-to-br from-[#1B4D3E] to-[#163F34] rounded-full flex items-center justify-center mx-auto mb-4"
                 >
                   <Bell className="w-10 h-10 text-white" />
                 </motion.div>

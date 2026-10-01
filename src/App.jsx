@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AdminProvider, useAdmin } from './contexts/AdminContext';
@@ -9,6 +9,7 @@ import ScrollToTop from './components/ScrollToTop';
 import CartToast from './components/CartToast';
 import HelpFloatButton from './components/HelpFloatButton';
 import CouponPopup from './components/CouponPopup';
+import AnalyticsTracker from './components/AnalyticsTracker';
 
 // Eagerly-loaded small views
 import LandingView from './views/LandingView';
@@ -23,7 +24,6 @@ import CartView from './views/CartView';
 import WishlistView from './views/WishlistView';
 
 // Lazy-loaded heavy views — loaded only when the user navigates to them
-const SplashScreen = lazy(() => import('./components/SplashScreen'));
 const ProductView = lazy(() => import('./views/ProductView'));
 const CheckoutView = lazy(() => import('./views/CheckoutView'));
 const ProfileView = lazy(() => import('./views/ProfileView'));
@@ -79,16 +79,16 @@ const AppShell = () => {
 
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty('--brand-primary', companySettings?.primaryColor || '#059669');
-    root.style.setProperty('--brand-secondary', companySettings?.secondaryColor || '#10b981');
-    root.style.setProperty('--brand-surface', companySettings?.surfaceColor || '#ecfdf5');
+    root.style.setProperty('--brand-primary', companySettings?.primaryColor || '#1B4D3E');
+    root.style.setProperty('--brand-secondary', companySettings?.secondaryColor || '#3E7A63');
+    root.style.setProperty('--brand-surface', companySettings?.surfaceColor || '#EEF4F1');
   }, [companySettings]);
 
   return (
     <div
       className="min-h-screen"
       style={{
-        background: `linear-gradient(135deg, ${companySettings?.surfaceColor || '#ecfdf5'} 0%, #ffffff 50%, ${companySettings?.secondaryColor || '#dcfce7'} 100%)`,
+        background: `linear-gradient(135deg, ${companySettings?.surfaceColor || '#EEF4F1'} 0%, #ffffff 50%, ${companySettings?.secondaryColor || '#C9DCD2'} 100%)`,
       }}
     >
       <Header />
@@ -124,33 +124,17 @@ const AppShell = () => {
 };
 
 function App() {
-  const [showSplash, setShowSplash] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowSplash(false);
-    }, 3000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const handleSplashComplete = () => {
-    setShowSplash(false);
-  };
-
-  if (showSplash) {
-    return (
-      <Suspense fallback={<PageLoader />}>
-        <SplashScreen onComplete={handleSplashComplete} />
-      </Suspense>
-    );
-  }
-
+  // The app shell mounts IMMEDIATELY — no full-page splash/loading gate.
+  // Data fetches run in the background and each section shows its own
+  // skeleton until its data arrives, so the homepage paints right away.
   return (
     <AuthProvider>
       <AdminProvider>
         <ProductProvider>
           <CartProvider>
             <Router>
+              {/* Sends a page view to Google Analytics on every route change */}
+              <AnalyticsTracker />
               <AppShell />
             </Router>
           </CartProvider>

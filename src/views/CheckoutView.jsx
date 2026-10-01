@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, CheckCircle2, CreditCard, Home, Plus, Tag, Truck, Wallet, X, Upload, MessageCircle, Globe } from 'lucide-react';
+import { ArrowLeft, AlertCircle, CheckCircle2, CreditCard, Home, Plus, Tag, Truck, Wallet, X, Upload, MessageCircle, Globe } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -13,6 +13,7 @@ import {
   getCodAvailability
 } from '../utils/delivery';
 import { isDelhiveryActive, calculateShippingCharge } from '../services/delhivery';
+import { prepareDocForWrite } from '../utils/chunkedFirestore';
 
 const emptyAddress = {
   name: '',
@@ -358,6 +359,23 @@ const CheckoutView = () => {
   const advance = paymentMethod === 'cod' ? 0 : total;
   const balance = Math.max(total - advance, 0);
 
+  // Stock problems detected in the cart — surfaced BEFORE the customer clicks
+  // Place Order, so out-of-stock items are visible up front.
+  const stockIssues = useMemo(() => {
+    const issues = [];
+    for (const item of cart) {
+      const product = products.find(p => String(p.id) === String(item.id));
+      const stock = (product && product.stock !== undefined) ? product.stock : item.stock;
+      if (stock === undefined || stock === null) continue;
+      if (stock <= 0) {
+        issues.push({ name: item.name, message: `"${item.name}" is out of stock — please remove it from your cart.` });
+      } else if (item.quantity > stock) {
+        issues.push({ name: item.name, message: `Only ${stock} unit(s) of "${item.name}" left — your cart has ${item.quantity}.` });
+      }
+    }
+    return issues;
+  }, [cart, products]);
+
   const handleInternationalWhatsAppOrder = () => {
     const custName = selectedAddress?.name || userData?.displayName || 'Valued Customer';
     const custPhone = selectedAddress?.phone || userData?.phone || 'Not provided';
@@ -496,7 +514,7 @@ const CheckoutView = () => {
           email: order.shippingAddress?.email || '',
           contact: phone,
         },
-        theme: { color: '#059669' },
+        theme: { color: '#1B4D3E' },
         modal: {
           ondismiss: () => safeResolve({ paid: false, cancelled: true }),
         },
@@ -580,28 +598,29 @@ const CheckoutView = () => {
       return;
     }
 
-    // Stock validation
+    // Stock validation — block the order BEFORE any payment happens so an
+    // out-of-stock item can never cost the customer money.
     for (const item of cart) {
       const product = products.find(p => String(p.id) === String(item.id));
-      if (product && product.stock !== undefined) {
-        if (product.stock <= 0) {
-          setPopup({
-            title: 'Out of Stock',
-            message: `${item.name} is out of stock and cannot be ordered.`,
-            primaryLabel: 'OK',
-            onPrimary: () => setPopup(null),
-          });
-          return;
-        }
-        if (item.quantity > product.stock) {
-          setPopup({
-            title: 'Insufficient Stock',
-            message: `Only ${product.stock} unit(s) of "${item.name}" are in stock. You requested ${item.quantity}. Please reduce the quantity.`,
-            primaryLabel: 'Fix Cart',
-            onPrimary: () => setPopup(null),
-          });
-          return;
-        }
+      const stock = (product && product.stock !== undefined) ? product.stock : item.stock;
+      if (stock === undefined || stock === null) continue;
+      if (stock <= 0) {
+        setPopup({
+          title: 'Out of Stock',
+          message: `"${item.name}" is currently out of stock. Please remove it from your cart to continue.`,
+          primaryLabel: 'OK',
+          onPrimary: () => setPopup(null),
+        });
+        return;
+      }
+      if (item.quantity > stock) {
+        setPopup({
+          title: 'Not Enough Stock',
+          message: `Only ${stock} unit(s) of "${item.name}" are available, but your cart has ${item.quantity}. Please reduce the quantity or remove the item.`,
+          primaryLabel: 'Fix My Cart',
+          onPrimary: () => setPopup(null),
+        });
+        return;
       }
     }
 
@@ -640,6 +659,22 @@ const CheckoutView = () => {
       userEmail: user?.email || '',
     };
 
+    // Build the Firestore-ready plan BEFORE charging the customer. If the
+    // order can't be prepared (e.g. a data problem), the user finds out now —
+    // never after payment. This is pure computation, no network involved.
+    try {
+      prepareDocForWrite(order);
+    } catch (prepErr) {
+      console.error('Order preparation failed:', prepErr);
+      setPopup({
+        title: 'Order Not Placed',
+        message: 'We could not prepare your order. Please try again, or contact support if the problem continues.',
+        primaryLabel: 'OK',
+        onPrimary: () => setPopup(null),
+      });
+      return;
+    }
+
     try {
       order.pendingAmount = 0; // No advance for COD, full amount due on delivery
 
@@ -676,10 +711,16 @@ const CheckoutView = () => {
       clearCart();
       navigate('/order-done');
     } catch (error) {
+      // If the payment went through but the order could not be saved, the
+      // customer must know their money is safe — show that clearly instead
+      // of a misleading "Payment Failed" message.
+      const paymentSucceeded = paymentMethod === 'online' && order?.paymentStatus === 'Paid';
       setPopup({
-        title: 'Payment Failed',
-        message: error.message || 'Something went wrong. Please try again.',
-        primaryLabel: 'Try Again',
+        title: paymentSucceeded ? 'Payment Received' : 'Order Not Placed',
+        message: paymentSucceeded
+          ? 'Your payment was successful, but we could not save your order due to a technical problem. Please contact us with your payment details and we will complete your order right away.'
+          : (error?.message || 'Something went wrong. Please try again.'),
+        primaryLabel: 'OK',
         onPrimary: () => { setPopup(null); },
       });
     }
@@ -971,25 +1012,37 @@ const CheckoutView = () => {
                 Order via WhatsApp
               </button>
             ) : (
-              <button
-                onClick={handlePlaceOrder}
-                disabled={delhiveryLoading && !hasTestProduct}
-                className={`mt-6 w-full btn-primary py-3 sm:py-4 text-sm sm:text-lg font-bold flex items-center justify-center gap-2 ${
-                  (delhiveryLoading && !hasTestProduct) ? 'opacity-60 cursor-not-allowed' : ''
-                }`}
-              >
-                {delhiveryLoading && !hasTestProduct ? (
-                  <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Calculating delivery charge…</span>
-                  </>
-                ) : (
-                  <>
-                    <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
-                    <span>Place Order</span>
-                  </>
+              <>
+                {stockIssues.length > 0 && (
+                  <div className="mt-4 rounded-2xl bg-rose-50 border border-rose-200 p-4 text-rose-700 text-xs sm:text-sm">
+                    <p className="font-bold mb-1.5 flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 shrink-0" /> Please fix your cart before ordering
+                    </p>
+                    <ul className="list-disc list-inside space-y-1">
+                      {stockIssues.map((issue, idx) => <li key={idx}>{issue.message}</li>)}
+                    </ul>
+                  </div>
                 )}
-              </button>
+                <button
+                  onClick={handlePlaceOrder}
+                  disabled={(delhiveryLoading && !hasTestProduct) || stockIssues.length > 0}
+                  className={`mt-6 w-full btn-primary py-3 sm:py-4 text-sm sm:text-lg font-bold flex items-center justify-center gap-2 ${
+                    (delhiveryLoading && !hasTestProduct) || stockIssues.length > 0 ? 'opacity-60 cursor-not-allowed' : ''
+                  }`}
+                >
+                  {delhiveryLoading && !hasTestProduct ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Calculating delivery charge…</span>
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
+                      <span>{stockIssues.length > 0 ? 'Fix Cart to Order' : 'Place Order'}</span>
+                    </>
+                  )}
+                </button>
+              </>
             )}
           </motion.div>
 
@@ -1056,6 +1109,9 @@ const CheckoutView = () => {
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-gray-800 truncate">{item.name}</p>
                     <p className="text-gray-500 text-[10px] sm:text-xs">Qty: {item.quantity}</p>
+                    {item.stock !== undefined && item.stock !== null && item.stock <= 0 && (
+                      <p className="text-rose-600 font-semibold text-[10px] sm:text-xs">Out of stock</p>
+                    )}
                     {item.customText && <p className="text-emerald-600 text-[10px] sm:text-xs truncate">Print: "{item.customText}"</p>}
                   </div>
                   <p className="font-semibold text-gray-800 shrink-0 text-xs sm:text-sm">₹{(item.price * item.quantity).toFixed(2)}</p>

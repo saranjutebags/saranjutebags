@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { ShoppingBag, Heart, Star, Search, Package } from 'lucide-react';
+import { ShoppingBag, Heart, Star, Search, Package, Loader2, RefreshCw } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useProducts } from '../contexts/ProductContext';
 import { useCart } from '../contexts/CartContext';
@@ -8,10 +8,11 @@ import SEOHead from '../components/SEOHead';
 import { slugify } from '../utils/slugify';
 
 const ProductsView = () => {
-  const { products, categories, loading } = useProducts();
+  const { products, categories, loading, productsError, loadingMore, hasMore, loadMoreProducts, refreshProducts } = useProducts();
   const { addToCart, toggleWishlist, isInWishlist } = useCart();
   const navigate = useNavigate();
   const location = useLocation();
+  const loadMoreRef = useRef(null);
 
   // Allow pre-selecting a category from the URL: /products?category=Jute+Bags
   const params = new URLSearchParams(location.search);
@@ -25,6 +26,22 @@ const ProductsView = () => {
     const p = new URLSearchParams(location.search);
     setSelectedCategory(p.get('category') || 'All');
   }, [location.search]);
+
+  // Intersection Observer for auto-loading more products when user scrolls near bottom
+  useEffect(() => {
+    if (!hasMore || loading) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loadingMore) {
+          loadMoreProducts();
+        }
+      },
+      { rootMargin: '200px' }
+    );
+    const el = loadMoreRef.current;
+    if (el) observer.observe(el);
+    return () => { if (el) observer.unobserve(el); };
+  }, [hasMore, loadingMore, loadMoreProducts, loading]);
 
   // Only show visible admin-created categories
   const visibleCategories = categories.filter(c => c.visible !== false);
@@ -65,7 +82,7 @@ const ProductsView = () => {
                 placeholder="Search products…"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-12 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm"
+                className="w-full pl-12 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1B4D3E]/40 focus:border-transparent text-sm"
               />
             </div>
 
@@ -75,7 +92,7 @@ const ProductsView = () => {
                 onClick={() => setSelectedCategory('All')}
                 className={`px-5 py-2.5 rounded-xl font-semibold whitespace-nowrap text-sm transition-all shrink-0 ${
                   selectedCategory === 'All'
-                    ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white shadow-md'
+                    ? 'bg-gradient-to-r from-[#1B4D3E] to-[#3E7A63] text-white shadow-md'
                     : 'bg-white text-gray-700 hover:bg-emerald-50 border border-gray-200'
                 }`}
               >
@@ -92,7 +109,7 @@ const ProductsView = () => {
                       onClick={() => setSelectedCategory(cat.name)}
                       className={`px-5 py-2.5 rounded-xl font-semibold whitespace-nowrap text-sm transition-all shrink-0 ${
                         selectedCategory === cat.name
-                          ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white shadow-md'
+                          ? 'bg-gradient-to-r from-[#1B4D3E] to-[#3E7A63] text-white shadow-md'
                           : 'bg-white text-gray-700 hover:bg-emerald-50 border border-gray-200'
                       }`}
                     >
@@ -117,11 +134,28 @@ const ProductsView = () => {
               </div>
             ))}
           </div>
+        ) : productsError && products.length === 0 ? (
+          /* Network/read failure — do not claim the store is empty */
+          <div className="text-center py-24">
+            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-5">
+              <RefreshCw className="w-10 h-10 text-red-400" />
+            </div>
+            <h3 className="text-2xl font-bold text-gray-800 mb-2">Couldn't load products</h3>
+            <p className="text-gray-500 text-sm max-w-sm mx-auto mb-6">
+              Please check your connection and try again.
+            </p>
+            <button
+              onClick={() => refreshProducts()}
+              className="btn-primary px-6 py-2.5 text-sm"
+            >
+              Retry
+            </button>
+          </div>
         ) : products.length === 0 ? (
           /* No products added by admin yet */
           <div className="text-center py-24">
             <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-5">
-              <Package className="w-10 h-10 text-emerald-400" />
+              <Package className="w-10 h-10 text-[#1B4D3E]" />
             </div>
             <h3 className="text-2xl font-bold text-gray-800 mb-2">No products yet</h3>
             <p className="text-gray-500 text-sm max-w-sm mx-auto">
@@ -142,98 +176,123 @@ const ProductsView = () => {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-            {filteredProducts.map((product, index) => (
-              <motion.div
-                key={product.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.03 }}
-                whileHover={{ y: -4 }}
-                className="glass rounded-2xl overflow-hidden shadow-lg border border-emerald-100 flex flex-col"
-              >
-                {/* Image */}
-                <div className="relative">
-                  <Link to={`/product/${slugify(product.name)}`} className="block">
-                    <div className="h-48 sm:h-52 bg-gradient-to-br from-emerald-50 to-mint-50 flex items-center justify-center p-3">
-                      {product.images?.[0] ? (
-                        <img src={product.images[0]} alt={product.name} className="h-full w-full object-contain" />
-                      ) : (
-                        <div className="w-16 h-16 bg-emerald-100 rounded-2xl flex items-center justify-center">
-                          <Package className="w-8 h-8 text-emerald-400" />
-                        </div>
-                      )}
-                    </div>
-                  </Link>
-                  <button
-                    onClick={() => toggleWishlist(product)}
-                    className="absolute top-3 right-3 p-2 bg-white rounded-full shadow-md hover:bg-red-50 transition-all"
-                  >
-                    <Heart className={`w-4 h-4 ${isInWishlist(product.id) ? 'text-red-500 fill-red-500' : 'text-gray-500'}`} />
-                  </button>
-                  {product.discountPercentage > 0 && (
-                    <span className="absolute top-3 left-3 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full">
-                      -{product.discountPercentage}%
-                    </span>
-                  )}
-                  {product.inStock === false && (
-                    <span className="absolute top-3 right-3 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full">
-                      Out of Stock
-                    </span>
-                  )}
-                </div>
-
-                {/* Details */}
-                <div className="p-3 sm:p-4 flex flex-col flex-1">
-                  <span className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">
-                    {product.category}
-                  </span>
-                  <Link to={`/product/${slugify(product.name)}`}>
-                    <h3 className="font-bold text-gray-800 text-sm sm:text-base mt-1 mb-2 line-clamp-2 hover:text-emerald-600 transition-colors leading-snug">
-                      {product.name}
-                    </h3>
-                  </Link>
-
-                  {/* Rating */}
-                  {product.rating > 0 && (
-                    <div className="flex items-center gap-1 mb-2">
-                      <div className="flex text-yellow-400">
-                        {[...Array(5)].map((_, i) => (
-                          <Star key={i} className={`w-3 h-3 ${i < Math.floor(product.rating) ? 'fill-current' : ''}`} />
-                        ))}
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+              {filteredProducts.map((product, index) => (
+                <motion.div
+                  key={product.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: Math.min(index * 0.03, 0.3) }}
+                  whileHover={{ y: -4 }}
+                  className="glass rounded-2xl overflow-hidden shadow-lg border border-emerald-100 flex flex-col"
+                >
+                  {/* Image */}
+                  <div className="relative">
+                    <Link to={`/product/${slugify(product.name)}`} className="block">
+                      <div className="h-48 sm:h-52 bg-gradient-to-br from-emerald-50 to-mint-50 flex items-center justify-center p-3">
+                        {product.images?.[0] ? (
+                          <img
+                            src={product.images[0]}
+                            alt={product.name}
+                            className="h-full w-full object-contain"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-16 h-16 bg-emerald-100 rounded-2xl flex items-center justify-center">
+                            <Package className="w-8 h-8 text-[#1B4D3E]" />
+                          </div>
+                        )}
                       </div>
-                      <span className="text-xs text-gray-400">({product.reviews || 0})</span>
-                    </div>
-                  )}
-
-                  {/* Weight */}
-                  {product.weightPerPiece > 0 && (
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      <Package className="w-3 h-3 text-gray-400" />
-                      <span className="text-[10px] text-gray-500">{product.weightPerPiece} kg/pc</span>
-                    </div>
-                  )}
-                  {/* Price */}
-                  <div className="flex items-center gap-2 mb-3 mt-auto">
-                    <span className="text-lg sm:text-xl font-bold text-emerald-600">₹{product.price}</span>
-                    {product.originalPrice > product.price && (
-                      <span className="text-xs text-gray-400 line-through">₹{product.originalPrice}</span>
+                    </Link>
+                    <button
+                      onClick={() => toggleWishlist(product)}
+                      className="absolute top-3 right-3 p-2 bg-white rounded-full shadow-md hover:bg-red-50 transition-all"
+                    >
+                      <Heart className={`w-4 h-4 ${isInWishlist(product.id) ? 'text-red-500 fill-red-500' : 'text-gray-500'}`} />
+                    </button>
+                    {product.discountPercentage > 0 && (
+                      <span className="absolute top-3 left-3 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full">
+                        -{product.discountPercentage}%
+                      </span>
+                    )}
+                    {product.inStock === false && (
+                      <span className="absolute top-3 right-3 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full">
+                        Out of Stock
+                      </span>
                     )}
                   </div>
 
-                  {/* Buttons */}
-                  <div className="flex gap-1.5 sm:gap-2">
-                    <button
-                      onClick={() => navigate(`/product/${slugify(product.name)}`)}
-                      className="btn-secondary px-2 sm:px-3 py-2 sm:py-2.5 text-[11px] sm:text-sm font-semibold shrink-0 whitespace-nowrap"
-                    >
-                      View
-                    </button>
+                  {/* Details */}
+                  <div className="p-3 sm:p-4 flex flex-col flex-1">
+                    <span className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">
+                      {product.category}
+                    </span>
+                    <Link to={`/product/${slugify(product.name)}`}>
+                      <h3 className="font-bold text-gray-800 text-sm sm:text-base mt-1 mb-2 line-clamp-2 hover:text-emerald-600 transition-colors leading-snug">
+                        {product.name}
+                      </h3>
+                    </Link>
+
+                    {/* Rating */}
+                    {product.rating > 0 && (
+                      <div className="flex items-center gap-1 mb-2">
+                        <div className="flex text-yellow-400">
+                          {[...Array(5)].map((_, i) => (
+                            <Star key={i} className={`w-3 h-3 ${i < Math.floor(product.rating) ? 'fill-current' : ''}`} />
+                          ))}
+                        </div>
+                        <span className="text-xs text-gray-400">({product.reviews || 0})</span>
+                      </div>
+                    )}
+
+                    {/* Weight */}
+                    {product.weightPerPiece > 0 && (
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <Package className="w-3 h-3 text-gray-400" />
+                        <span className="text-[10px] text-gray-500">{product.weightPerPiece} kg/pc</span>
+                      </div>
+                    )}
+                    {/* Price */}
+                    <div className="flex items-center gap-2 mb-3 mt-auto">
+                      <span className="text-lg sm:text-xl font-bold text-emerald-600">₹{product.price}</span>
+                      {product.originalPrice > product.price && (
+                        <span className="text-xs text-gray-400 line-through">₹{product.originalPrice}</span>
+                      )}
+                    </div>
+
+                    {/* Buttons */}
+                    <div className="flex gap-1.5 sm:gap-2">
+                      <button
+                        onClick={() => navigate(`/product/${slugify(product.name)}`)}
+                        className="btn-secondary px-2 sm:px-3 py-2 sm:py-2.5 text-[11px] sm:text-sm font-semibold shrink-0 whitespace-nowrap"
+                      >
+                        View
+                      </button>
+                    </div>
                   </div>
+                </motion.div>
+              ))}
+            </div>
+
+            {/* Load More trigger (intersection observer) + manual button fallback */}
+            <div ref={loadMoreRef} className="mt-10 flex justify-center">
+              {loadingMore && (
+                <div className="flex items-center gap-2 text-emerald-600 font-medium">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Loading more…</span>
                 </div>
-              </motion.div>
-            ))}
-          </div>
+              )}
+              {!loadingMore && hasMore && searchQuery === '' && selectedCategory === 'All' && (
+                <button
+                  onClick={loadMoreProducts}
+                  className="btn-secondary px-8 py-3 text-sm font-semibold"
+                >
+                  Load More Products
+                </button>
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>

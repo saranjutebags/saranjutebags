@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { ShoppingBag, Heart, Star, ArrowLeft, Share2, Truck, ShieldCheck, RefreshCw, Check, X, ImagePlus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
@@ -13,7 +13,7 @@ const ProductView = () => {
   const { slug } = useParams();
   const location = useLocation();
   const productUrl = `${window.location.origin}${location.pathname}`;
-  const { getProductBySlug, addReview } = useProducts();
+  const { getProductBySlug, fetchSingleProduct, addReview } = useProducts();
   const { addToCart, toggleWishlist, isInWishlist } = useCart();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -37,17 +37,69 @@ const ProductView = () => {
   const [showStylesPopup, setShowStylesPopup] = useState(false);
   const [pendingCartData, setPendingCartData] = useState(null);
   
-  const product = getProductBySlug(slug);
+  // Direct product state for single product lookups (e.g. shared URLs)
+  const [directProduct, setDirectProduct] = useState(null);
+  // 'loading' → lookup in flight, 'found' → resolved, 'notfound' → confirmed miss
+  const [productStatus, setProductStatus] = useState('loading');
+  const fetchSingleRef = useRef(fetchSingleProduct);
+  fetchSingleRef.current = fetchSingleProduct;
+
+  const product = directProduct || getProductBySlug(slug);
+
+  // Full-resolution images when available (chunked products), thumbnails otherwise.
+  const displayImages = product && product.fullImages && product.fullImages.length > 0
+    ? product.fullImages
+    : (product?.images || []);
+
+  useEffect(() => {
+    let active = true;
+    // New URL → reset image position and any stale direct product
+    setCurrentImage(0);
+    setDirectProduct(null);
+
+    const existing = getProductBySlug(slug);
+    // The list copy renders INSTANTLY; the fetch below silently upgrades it
+    // to full-resolution images. "Product Not Found" only appears after the
+    // lookup completes without a match — never while it is in flight.
+    setProductStatus(existing ? 'found' : 'loading');
+
+    const doFetch = fetchSingleRef.current;
+    if (!doFetch) {
+      if (!existing) setProductStatus('notfound');
+      return;
+    }
+
+    doFetch(slug)
+      .then((found) => {
+        if (!active) return;
+        if (found) {
+          setDirectProduct(found);
+          setProductStatus('found');
+        } else if (!existing) {
+          setDirectProduct(null);
+          setProductStatus('notfound');
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        if (!existing) setProductStatus('notfound');
+      });
+
+    return () => { active = false; };
+  }, [slug]);
 
   const handleAddToCart = () => {
     if (!user) {
       navigate('/auth');
       return;
     }
+    // Cart items keep the light inline images (thumbnails) so orders stay small.
+    const cartImages = product.images || [];
+    const selectedImage = cartImages[Math.min(currentImage, Math.max(cartImages.length - 1, 0))] || cartImages[0];
     // If product has styles, show the styles selection popup
     if (product?.styles?.length > 0) {
       setPendingCartData({
-        product: { ...product, selectedImage: product.images[currentImage] || product.images[0] },
+        product: { ...product, selectedImage },
         quantity,
         customText,
         customLogo
@@ -55,7 +107,7 @@ const ProductView = () => {
       setShowStylesPopup(true);
     } else {
       addToCart(
-        { ...product, selectedImage: product.images[currentImage] || product.images[0] },
+        { ...product, selectedImage },
         quantity, customText, customLogo
       );
     }
@@ -132,12 +184,35 @@ const ProductView = () => {
     }
   };
 
-  if (!product) {
+  if (!product && productStatus === 'loading') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <p className="flex items-center justify-center gap-2 text-emerald-700 font-semibold mb-6">
+            <span className="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+            Loading product…
+          </p>
+          <div className="grid md:grid-cols-2 gap-12">
+            <div className="h-[450px] bg-emerald-100/50 rounded-3xl animate-pulse" />
+            <div className="space-y-6">
+              <div className="h-8 bg-gray-200 rounded-xl w-3/4 animate-pulse" />
+              <div className="h-6 bg-gray-100 rounded-xl w-1/4 animate-pulse" />
+              <div className="h-24 bg-gray-100 rounded-2xl animate-pulse" />
+              <div className="h-14 bg-emerald-200/50 rounded-2xl w-full animate-pulse" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!product && productStatus === 'notfound') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16 flex items-center justify-center">
-        <div className="text-center glass rounded-3xl p-12 border border-emerald-100">
+        <div className="text-center glass rounded-3xl p-12 border border-emerald-100 max-w-md">
           <div className="text-6xl mb-4">🌿</div>
-          <h2 className="text-3xl font-bold text-gray-800 mb-4">Product not found</h2>
+          <h2 className="text-3xl font-bold text-gray-800 mb-3">Product Not Found</h2>
+          <p className="text-gray-600 mb-6 text-sm">The product you are looking for does not exist or may have been removed.</p>
           <Link to="/products" className="btn-primary inline-block">
             Back to Products
           </Link>
@@ -218,27 +293,27 @@ const ProductView = () => {
             <div className="glass rounded-3xl p-8 border border-emerald-100">
               <div className="relative h-[400px] bg-gradient-to-br from-emerald-50 to-mint-50 rounded-2xl flex items-center justify-center overflow-hidden group">
                 <img
-                  src={product.images[currentImage]}
+                  src={displayImages[Math.min(currentImage, Math.max(displayImages.length - 1, 0))]}
                   alt={product.name}
                   className="h-full w-full object-contain transition-all duration-300"
                 />
 
-                {product.images.length > 1 && (
+                {displayImages.length > 1 && (
                   <>
                     <button
-                      onClick={() => setCurrentImage(prev => (prev === 0 ? product.images.length - 1 : prev - 1))}
+                      onClick={() => setCurrentImage(prev => (prev === 0 ? displayImages.length - 1 : prev - 1))}
                       className="absolute left-2 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white text-gray-800 p-2 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <ChevronLeft className="w-5 h-5" />
                     </button>
                     <button
-                      onClick={() => setCurrentImage(prev => (prev === product.images.length - 1 ? 0 : prev + 1))}
+                      onClick={() => setCurrentImage(prev => (prev === displayImages.length - 1 ? 0 : prev + 1))}
                       className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white text-gray-800 p-2 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <ChevronRight className="w-5 h-5" />
                     </button>
                     <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2">
-                      {product.images.map((_, idx) => (
+                      {displayImages.map((_, idx) => (
                         <button
                           key={idx}
                           onClick={() => setCurrentImage(idx)}
@@ -270,9 +345,9 @@ const ProductView = () => {
               </div>
             </div>
 
-            {product.images.length > 1 && (
+            {displayImages.length > 1 && (
               <div className="grid grid-cols-4 gap-4">
-                {product.images.map((img, idx) => (
+                {displayImages.map((img, idx) => (
                   <button
                     key={idx}
                     onClick={() => setCurrentImage(idx)}

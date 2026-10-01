@@ -75,7 +75,7 @@ const OfflineBillsSheet = ({ showMessage }) => {
 
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
           <thead>
-            <tr style="background-color: #f0fdf4;">
+            <tr style="background-color: #EEF4F1;">
               <th style="padding: 10px; text-align: left; border: 1.5px solid #333;">#</th>
               <th style="padding: 10px; text-align: left; border: 1.5px solid #333;">Item</th>
               <th style="padding: 10px; text-align: center; border: 1.5px solid #333;">Qty</th>

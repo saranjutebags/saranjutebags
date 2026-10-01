@@ -58,7 +58,7 @@ const Header = () => {
       {/* Scrolling Announcement Bar */}
       {scrollingTexts && scrollingTexts.filter(t => t.active).length > 0 && (
         <div className="relative w-screen" style={{ marginLeft: 'calc(-50vw + 50%)', marginRight: 'calc(-50vw + 50%)' }}>
-          <div className="bg-gradient-to-r from-emerald-600 to-green-600 text-white text-[11px] sm:text-xs font-medium overflow-hidden h-7 sm:h-8 flex items-center">
+          <div className="bg-gradient-to-r from-[#163F34] via-[#1B4D3E] to-[#3E7A63] text-white text-[11px] sm:text-xs font-medium overflow-hidden h-7 sm:h-8 flex items-center">
             <div className="marquee-track flex gap-12 whitespace-nowrap animate-marquee">
               {[...Array(3)].flatMap(() => scrollingTexts.filter(t => t.active)).map((t, i) => (
                 <span key={`${t.id}-${i}`} className="px-4">{t.text}</span>
@@ -212,7 +212,7 @@ const Header = () => {
             ) : (
               <button
                 onClick={() => navigate('/auth')}
-                className="btn-primary text-xs sm:text-sm px-2 sm:px-5 py-1.5 sm:py-2.5 flex items-center space-x-1"
+                className="bg-[#1B4D3E] hover:bg-[#3E7A63] text-white rounded-xl font-semibold shadow-md transition-all text-xs sm:text-sm px-2 sm:px-5 py-1.5 sm:py-2.5 flex items-center space-x-1"
               >
                 <User className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 <span className="hidden sm:inline">Login</span>
@@ -257,7 +257,7 @@ const Header = () => {
                     navigate('/auth');
                     setIsOpen(false);
                   }}
-                  className="btn-primary w-full mt-4 py-3"
+                  className="bg-[#1B4D3E] hover:bg-[#3E7A63] text-white rounded-xl font-semibold shadow-md transition-all w-full mt-4 py-3"
                 >
                   Login / Sign Up
                 </button>

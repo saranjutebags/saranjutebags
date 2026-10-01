@@ -1,6 +1,13 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
 import { db, isFirebaseActive } from '../firebase/config';
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import {
+  fetchCachedDoc,
+  fetchCachedCollection,
+  invalidateCache,
+  setCache,
+} from '../utils/firestoreCache';
+import { setDocSafe, hydrateDoc, deleteDocSafe } from '../utils/chunkedFirestore';
 
 const AdminContext = createContext();
 
@@ -51,9 +58,9 @@ const writeJson = (key, value) => {
 const defaultCompanySettings = {
   companyName: 'Saran Jute Bags',
   logo: '/logo.webp',
-  primaryColor: '#059669',
-  secondaryColor: '#10b981',
-  surfaceColor: '#ecfdf5',
+  primaryColor: '#1B4D3E',
+  secondaryColor: '#3E7A63',
+  surfaceColor: '#EEF4F1',
   addressLine1: '12-2-421/4 Alapathi Nagar Guddimalkapur',
   cityStatePin: 'Hyderabad, Telangana 500028',
   gstin: '',
@@ -110,6 +117,19 @@ const defaultRoles = [
 
 const createId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
+// The previous default brand green (#059669) is migrated automatically to the
+// current deep evergreen so every existing visitor and stored settings doc
+// picks up the new brand color without any manual step.
+const LEGACY_PRIMARY = '#059669';
+const BRAND_PRIMARY = '#1B4D3E';
+const BRAND_SECONDARY = '#3E7A63';
+const BRAND_SURFACE = '#EEF4F1';
+
+const normalizeCompanyColors = (data) => {
+  if (!data || data.primaryColor !== LEGACY_PRIMARY) return data;
+  return { ...data, primaryColor: BRAND_PRIMARY, secondaryColor: BRAND_SECONDARY, surfaceColor: BRAND_SURFACE };
+};
+
 export const useAdmin = () => {
   const context = useContext(AdminContext);
   if (!context) {
@@ -119,7 +139,7 @@ export const useAdmin = () => {
 };
 
 export const AdminProvider = ({ children }) => {
-  const [companySettings, setCompanySettings] = useState(() => readJson(STORAGE_KEYS.companySettings, defaultCompanySettings));
+  const [companySettings, setCompanySettings] = useState(() => normalizeCompanyColors(readJson(STORAGE_KEYS.companySettings, defaultCompanySettings)));
   const [homepage, setHomepage] = useState(() => readJson(STORAGE_KEYS.homepage, defaultHomepage));
   const [popups, setPopups] = useState(() => readJson(STORAGE_KEYS.popups, defaultPopups));
   const [banners, setBanners] = useState(() => readJson(STORAGE_KEYS.banners, defaultBanners));
@@ -141,113 +161,174 @@ export const AdminProvider = ({ children }) => {
     { id: 'dev-1', lastLogin: new Date().toLocaleString(), device: 'Chrome on Windows', ip: '127.0.0.1', active: true }
   ]));
 
-  // Sync with Firestore if active
+  // ─── Chunked-doc hydration ──────────────────────────────────────────────────
+  // setDocSafe stores oversized fields (uploaded images) in a `chunks`
+  // subcollection and leaves '' placeholders in the main doc. These helpers
+  // rebuild the full values so admin data renders normally.
+  const hydrateDocList = async (collectionName, docs) => {
+    if (!Array.isArray(docs)) return docs;
+    const chunked = docs.filter(d => d && d.__chunked);
+    if (chunked.length === 0) return docs;
+    const results = await Promise.all(
+      chunked.map(d => hydrateDoc(doc(db, collectionName, String(d.id)), d).catch(() => null))
+    );
+    const map = {};
+    chunked.forEach((d, i) => { if (results[i]) map[String(d.id)] = results[i]; });
+    return docs.map(d => map[String(d.id)] || d);
+  };
+
+  const hydrateSingleDoc = async (collectionPath, docId, data) => {
+    if (!data || !data.__chunked) return data;
+    const hydrated = await hydrateDoc(doc(db, collectionPath, docId), data);
+    return hydrated || data;
+  };
+
+  // ─── Load settings via cached one-time reads (no persistent listeners) ──────
+  // This replaces 10 realtime listeners with a single parallel fetch.
+  // Data is cached in memory + localStorage so repeated mounts are free.
   useEffect(() => {
     if (!isFirebaseActive) return;
 
-    const unsubCompany = onSnapshot(doc(db, 'settings', 'company'), (snap) => {
-      if (snap.exists()) {
-        setCompanySettings(snap.data());
-      } else {
-        setDoc(doc(db, 'settings', 'company'), defaultCompanySettings);
-      }
-    });
+    let cancelled = false;
 
-    const unsubHomepage = onSnapshot(doc(db, 'settings', 'homepage'), (snap) => {
-      if (snap.exists()) {
-        setHomepage(snap.data());
-      } else {
-        setDoc(doc(db, 'settings', 'homepage'), defaultHomepage);
-      }
-    });
+    const loadSettings = async () => {
+      const [
+        company,
+        homepageData,
+        securityData,
+        popupsData,
+        bannersData,
+        reviewsData,
+        notificationsData,
+        scrollingTextsData,
+        testProductData,
+      ] = await Promise.all([
+        fetchCachedDoc(db, 'settings', 'company',   { fallback: defaultCompanySettings }),
+        fetchCachedDoc(db, 'settings', 'homepage',  { fallback: defaultHomepage }),
+        fetchCachedDoc(db, 'settings', 'security',  { fallback: defaultSecurity }),
+        fetchCachedCollection(db, 'popups',          { fallback: defaultPopups }),
+        fetchCachedCollection(db, 'banners',         { fallback: defaultBanners }),
+        fetchCachedCollection(db, 'reviews',         { fallback: defaultReviews }),
+        fetchCachedCollection(db, 'notifications',   { fallback: defaultNotifications }),
+        fetchCachedCollection(db, 'scrollingTexts',  { fallback: defaultScrollingTexts }),
+        fetchCachedDoc(db, 'settings', 'testProduct', { fallback: defaultTestProductSettings }),
+      ]);
 
-    const unsubSecurity = onSnapshot(doc(db, 'settings', 'security'), (snap) => {
-      if (snap.exists()) {
-        setSecurity(snap.data());
-      } else {
-        setDoc(doc(db, 'settings', 'security'), defaultSecurity);
-      }
-    });
+      if (cancelled) return;
 
-    const unsubPopups = onSnapshot(collection(db, 'popups'), (snap) => {
-      if (snap.empty) {
-        defaultPopups.forEach(p => setDoc(doc(db, 'popups', p.id), p));
-      } else {
-        const docs = [];
-        snap.forEach(d => docs.push(d.data()));
-        setPopups(docs);
+      if (company) {
+        const hydrated = await hydrateSingleDoc('settings', 'company', company);
+        const normalized = normalizeCompanyColors(hydrated);
+        setCompanySettings(normalized);
+        // Persist the color migration back to Firestore when permitted.
+        if (normalized !== hydrated) {
+          setDocSafe(doc(db, 'settings', 'company'), normalized, { keepDataUrls: true }).catch(() => undefined);
+        }
       }
-    });
-
-    const unsubBanners = onSnapshot(collection(db, 'banners'), (snap) => {
-      if (snap.empty) {
-        defaultBanners.forEach(b => setDoc(doc(db, 'banners', b.id), b));
-      } else {
-        const docs = [];
-        snap.forEach(d => docs.push(d.data()));
-        setBanners(docs);
-      }
-    });
-
-    const unsubReviews = onSnapshot(collection(db, 'reviews'), (snap) => {
-      if (snap.empty) {
-        defaultReviews.forEach(r => setDoc(doc(db, 'reviews', r.id), r));
-      } else {
-        const docs = [];
-        snap.forEach(d => docs.push(d.data()));
-        setReviews(docs);
-      }
-    });
-
-    const unsubNotifications = onSnapshot(collection(db, 'notifications'), (snap) => {
-      if (snap.empty) {
-        defaultNotifications.forEach(n => setDoc(doc(db, 'notifications', n.id), n));
-      } else {
-        const docs = [];
-        snap.forEach(d => docs.push(d.data()));
-        setNotifications(docs);
-      }
-    });
-
-    const unsubLogs = onSnapshot(collection(db, 'activityLogs'), (snap) => {
-      if (!snap.empty) {
-        const docs = [];
-        snap.forEach(d => docs.push(d.data()));
-        docs.sort((a, b) => b.id.localeCompare(a.id));
-        setActivityLogs(docs.slice(0, 100));
-      }
-    });
-
-    const unsubScrollingTexts = onSnapshot(collection(db, 'scrollingTexts'), (snap) => {
-      if (snap.empty) {
-        defaultScrollingTexts.forEach(t => setDoc(doc(db, 'scrollingTexts', t.id), t));
-      } else {
-        const docs = [];
-        snap.forEach(d => docs.push(d.data()));
-        setScrollingTexts(docs);
-      }
-    });
-
-    const unsubTestProduct = onSnapshot(doc(db, 'settings', 'testProduct'), (snap) => {
-      if (snap.exists()) {
-        setTestProductSettings(snap.data());
-      } else {
-        setDoc(doc(db, 'settings', 'testProduct'), defaultTestProductSettings);
-      }
-    });
-
-    return () => {
-      unsubCompany();
-      unsubHomepage();
-      unsubSecurity();
-      unsubPopups();
-      unsubBanners();
-      unsubReviews();
-      unsubNotifications();
-      unsubLogs();
-      unsubScrollingTexts();
-      unsubTestProduct();
+      if (homepageData)     setHomepage(await hydrateSingleDoc('settings', 'homepage', homepageData));
+      if (securityData)     setSecurity(await hydrateSingleDoc('settings', 'security', securityData));
+      if (popupsData)       setPopups(await hydrateDocList('popups', popupsData));
+      if (bannersData)      setBanners(await hydrateDocList('banners', bannersData));
+      if (reviewsData)      setReviews(await hydrateDocList('reviews', reviewsData));
+      if (notificationsData) setNotifications(await hydrateDocList('notifications', notificationsData));
+      if (scrollingTextsData) setScrollingTexts(await hydrateDocList('scrollingTexts', scrollingTextsData));
+      if (testProductData)  setTestProductSettings(await hydrateSingleDoc('settings', 'testProduct', testProductData));
     };
+
+    loadSettings();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ─── Admin-only: expose a function to attach realtime listeners ──────────────
+  // Only called from the admin dashboard (ProtectedAdminRoute), not globally.
+  const subscribeAdminRealtime = useCallback((onUpdate) => {
+    if (!isFirebaseActive) return () => {};
+
+    const unsubs = [
+      onSnapshot(doc(db, 'settings', 'company'), (snap) => {
+        if (!snap.exists()) return;
+        hydrateSingleDoc('settings', 'company', snap.data()).then((data) => {
+          const normalized = normalizeCompanyColors(data);
+          setCompanySettings(normalized);
+          setCache('settings/company', normalized);
+          if (normalized !== data) {
+            setDocSafe(doc(db, 'settings', 'company'), normalized, { keepDataUrls: true }).catch(() => undefined);
+          }
+          onUpdate?.('company', normalized);
+        });
+      }),
+      onSnapshot(doc(db, 'settings', 'homepage'), (snap) => {
+        if (!snap.exists()) return;
+        hydrateSingleDoc('settings', 'homepage', snap.data()).then((data) => {
+          setHomepage(data);
+          setCache('settings/homepage', data);
+        });
+      }),
+      onSnapshot(doc(db, 'settings', 'security'), (snap) => {
+        if (!snap.exists()) return;
+        hydrateSingleDoc('settings', 'security', snap.data()).then((data) => {
+          setSecurity(data);
+          setCache('settings/security', data);
+        });
+      }),
+      onSnapshot(collection(db, 'popups'), (snap) => {
+        const docs = [];
+        snap.forEach(d => docs.push({ ...d.data(), id: d.id }));
+        hydrateDocList('popups', docs).then((hydrated) => {
+          setPopups(hydrated);
+          setCache('popups', hydrated);
+        });
+      }),
+      onSnapshot(collection(db, 'banners'), (snap) => {
+        const docs = [];
+        snap.forEach(d => docs.push({ ...d.data(), id: d.id }));
+        hydrateDocList('banners', docs).then((hydrated) => {
+          setBanners(hydrated);
+          setCache('banners', hydrated);
+        });
+      }),
+      onSnapshot(collection(db, 'reviews'), (snap) => {
+        const docs = [];
+        snap.forEach(d => docs.push({ ...d.data(), id: d.id }));
+        hydrateDocList('reviews', docs).then((hydrated) => {
+          setReviews(hydrated);
+          setCache('reviews', hydrated);
+        });
+      }),
+      onSnapshot(collection(db, 'notifications'), (snap) => {
+        const docs = [];
+        snap.forEach(d => docs.push({ ...d.data(), id: d.id }));
+        hydrateDocList('notifications', docs).then((hydrated) => {
+          setNotifications(hydrated);
+          setCache('notifications', hydrated);
+        });
+      }),
+      onSnapshot(collection(db, 'activityLogs'), (snap) => {
+        if (!snap.empty) {
+          const docs = [];
+          snap.forEach(d => docs.push(d.data()));
+          docs.sort((a, b) => b.id.localeCompare(a.id));
+          setActivityLogs(docs.slice(0, 100));
+        }
+      }),
+      onSnapshot(collection(db, 'scrollingTexts'), (snap) => {
+        const docs = [];
+        snap.forEach(d => docs.push({ ...d.data(), id: d.id }));
+        hydrateDocList('scrollingTexts', docs).then((hydrated) => {
+          setScrollingTexts(hydrated);
+          setCache('scrollingTexts', hydrated);
+        });
+      }),
+      onSnapshot(doc(db, 'settings', 'testProduct'), (snap) => {
+        if (!snap.exists()) return;
+        hydrateSingleDoc('settings', 'testProduct', snap.data()).then((data) => {
+          setTestProductSettings(data);
+          setCache('settings/testProduct', data);
+        });
+      }),
+    ];
+
+    return () => unsubs.forEach(u => u());
   }, []);
 
   useEffect(() => {
@@ -335,20 +416,21 @@ export const AdminProvider = ({ children }) => {
   };
 
   const updateCompanySettings = (updates) => {
+    const next = { ...companySettings, ...updates };
     if (isFirebaseActive) {
-      setDoc(doc(db, 'settings', 'company'), { ...companySettings, ...updates });
-    } else {
-      setCompanySettings((prev) => ({ ...prev, ...updates }));
+      invalidateCache('settings/company');
+      setDocSafe(doc(db, 'settings', 'company'), next, { keepDataUrls: true }).catch(() => undefined);
     }
+    setCompanySettings(next);
     addActivityLog('Updated company settings');
   };
   
   const updateHomepage = (updates) => {
+    const next = { ...homepage, ...updates };
     if (isFirebaseActive) {
-      setDoc(doc(db, 'settings', 'homepage'), { ...homepage, ...updates });
-    } else {
-      setHomepage((prev) => ({ ...prev, ...updates }));
+      setDocSafe(doc(db, 'settings', 'homepage'), next, { keepDataUrls: true }).catch(() => undefined);
     }
+    setHomepage(next);
     addActivityLog('Updated homepage configuration');
   };
 
@@ -356,31 +438,28 @@ export const AdminProvider = ({ children }) => {
     const id = createId('popup');
     const newPopup = { ...popup, id };
     if (isFirebaseActive) {
-      setDoc(doc(db, 'popups', id), newPopup);
-    } else {
-      setPopups((prev) => [newPopup, ...prev]);
+      setDocSafe(doc(db, 'popups', id), newPopup, { keepDataUrls: true }).catch(() => undefined);
     }
+    setPopups((prev) => [newPopup, ...prev]);
     addActivityLog(`Created popup: ${popup.title}`);
   };
   
   const updatePopup = (popupId, updates) => {
+    const existing = popups.find(p => p.id === popupId);
+    if (!existing) return;
+    const next = { ...existing, ...updates };
     if (isFirebaseActive) {
-      const existing = popups.find(p => p.id === popupId);
-      if (existing) {
-        setDoc(doc(db, 'popups', popupId), { ...existing, ...updates });
-      }
-    } else {
-      setPopups((prev) => prev.map((popup) => (popup.id === popupId ? { ...popup, ...updates } : popup)));
+      setDocSafe(doc(db, 'popups', popupId), next, { keepDataUrls: true }).catch(() => undefined);
     }
+    setPopups((prev) => prev.map((popup) => (popup.id === popupId ? next : popup)));
     addActivityLog('Updated popup settings');
   };
   
   const deletePopup = (popupId) => {
     if (isFirebaseActive) {
-      deleteDoc(doc(db, 'popups', popupId));
-    } else {
-      setPopups((prev) => prev.filter((popup) => popup.id !== popupId));
+      deleteDocSafe(doc(db, 'popups', popupId)).catch(() => undefined);
     }
+    setPopups((prev) => prev.filter((popup) => popup.id !== popupId));
     addActivityLog('Deleted popup');
   };
 
@@ -388,31 +467,28 @@ export const AdminProvider = ({ children }) => {
     const id = createId('banner');
     const newBanner = { ...banner, id };
     if (isFirebaseActive) {
-      setDoc(doc(db, 'banners', id), newBanner);
-    } else {
-      setBanners((prev) => [newBanner, ...prev]);
+      setDocSafe(doc(db, 'banners', id), newBanner, { keepDataUrls: true }).catch(() => undefined);
     }
+    setBanners((prev) => [newBanner, ...prev]);
     addActivityLog(`Added banner: ${banner.title}`);
   };
   
   const updateBanner = (bannerId, updates) => {
+    const existing = banners.find(b => b.id === bannerId);
+    if (!existing) return;
+    const next = { ...existing, ...updates };
     if (isFirebaseActive) {
-      const existing = banners.find(b => b.id === bannerId);
-      if (existing) {
-        setDoc(doc(db, 'banners', bannerId), { ...existing, ...updates });
-      }
-    } else {
-      setBanners((prev) => prev.map((banner) => (banner.id === bannerId ? { ...banner, ...updates } : banner)));
+      setDocSafe(doc(db, 'banners', bannerId), next, { keepDataUrls: true }).catch(() => undefined);
     }
+    setBanners((prev) => prev.map((banner) => (banner.id === bannerId ? next : banner)));
     addActivityLog('Updated banner settings');
   };
   
   const deleteBanner = (bannerId) => {
     if (isFirebaseActive) {
-      deleteDoc(doc(db, 'banners', bannerId));
-    } else {
-      setBanners((prev) => prev.filter((banner) => banner.id !== bannerId));
+      deleteDocSafe(doc(db, 'banners', bannerId)).catch(() => undefined);
     }
+    setBanners((prev) => prev.filter((banner) => banner.id !== bannerId));
     addActivityLog('Deleted banner');
   };
 
@@ -420,31 +496,28 @@ export const AdminProvider = ({ children }) => {
     const id = createId('rev');
     const newReview = { ...review, id };
     if (isFirebaseActive) {
-      setDoc(doc(db, 'reviews', id), newReview);
-    } else {
-      setReviews((prev) => [newReview, ...prev]);
+      setDocSafe(doc(db, 'reviews', id), newReview, { keepDataUrls: true }).catch(() => undefined);
     }
+    setReviews((prev) => [newReview, ...prev]);
     addActivityLog(`Added customer review for approval`);
   };
   
   const updateReview = (reviewId, updates) => {
+    const existing = reviews.find(r => r.id === reviewId);
+    if (!existing) return;
+    const next = { ...existing, ...updates };
     if (isFirebaseActive) {
-      const existing = reviews.find(r => r.id === reviewId);
-      if (existing) {
-        setDoc(doc(db, 'reviews', reviewId), { ...existing, ...updates });
-      }
-    } else {
-      setReviews((prev) => prev.map((review) => (review.id === reviewId ? { ...review, ...updates } : review)));
+      setDocSafe(doc(db, 'reviews', reviewId), next, { keepDataUrls: true }).catch(() => undefined);
     }
+    setReviews((prev) => prev.map((review) => (review.id === reviewId ? next : review)));
     addActivityLog('Moderated customer review');
   };
   
   const deleteReview = (reviewId) => {
     if (isFirebaseActive) {
-      deleteDoc(doc(db, 'reviews', reviewId));
-    } else {
-      setReviews((prev) => prev.filter((review) => review.id !== reviewId));
+      deleteDocSafe(doc(db, 'reviews', reviewId)).catch(() => undefined);
     }
+    setReviews((prev) => prev.filter((review) => review.id !== reviewId));
     addActivityLog('Deleted customer review');
   };
 
@@ -452,40 +525,37 @@ export const AdminProvider = ({ children }) => {
     const id = createId('note');
     const newNotification = { ...notification, id };
     if (isFirebaseActive) {
-      setDoc(doc(db, 'notifications', id), newNotification);
-    } else {
-      setNotifications((prev) => [newNotification, ...prev]);
+      setDocSafe(doc(db, 'notifications', id), newNotification).catch(() => undefined);
     }
+    setNotifications((prev) => [newNotification, ...prev]);
     addActivityLog(`Sent push notification: ${notification.title}`);
   };
   
   const updateNotification = (noteId, updates) => {
+    const existing = notifications.find(n => n.id === noteId);
+    if (!existing) return;
+    const next = { ...existing, ...updates };
     if (isFirebaseActive) {
-      const existing = notifications.find(n => n.id === noteId);
-      if (existing) {
-        setDoc(doc(db, 'notifications', noteId), { ...existing, ...updates });
-      }
-    } else {
-      setNotifications((prev) => prev.map((note) => (note.id === noteId ? { ...note, ...updates } : note)));
+      setDocSafe(doc(db, 'notifications', noteId), next).catch(() => undefined);
     }
+    setNotifications((prev) => prev.map((note) => (note.id === noteId ? next : note)));
     addActivityLog('Updated notification settings');
   };
   
   const deleteNotification = (noteId) => {
     if (isFirebaseActive) {
-      deleteDoc(doc(db, 'notifications', noteId));
-    } else {
-      setNotifications((prev) => prev.filter((note) => note.id !== noteId));
+      deleteDocSafe(doc(db, 'notifications', noteId)).catch(() => undefined);
     }
+    setNotifications((prev) => prev.filter((note) => note.id !== noteId));
     addActivityLog('Deleted notification history');
   };
 
   const updateSecurity = (updates) => {
+    const next = { ...security, ...updates };
     if (isFirebaseActive) {
-      setDoc(doc(db, 'settings', 'security'), { ...security, ...updates });
-    } else {
-      setSecurity((prev) => ({ ...prev, ...updates }));
+      setDocSafe(doc(db, 'settings', 'security'), next).catch(() => undefined);
     }
+    setSecurity(next);
     addActivityLog('Updated security preferences');
   };
   
@@ -498,31 +568,28 @@ export const AdminProvider = ({ children }) => {
     const id = `scroll-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
     const newItem = { id, text, active: true };
     if (isFirebaseActive) {
-      setDoc(doc(db, 'scrollingTexts', id), newItem);
-    } else {
-      setScrollingTexts((prev) => [...prev, newItem]);
+      setDocSafe(doc(db, 'scrollingTexts', id), newItem).catch(() => undefined);
     }
+    setScrollingTexts((prev) => [...prev, newItem]);
     addActivityLog('Added scrolling text');
   };
 
   const updateScrollingText = (textId, updates) => {
+    const existing = scrollingTexts.find(t => t.id === textId);
+    if (!existing) return;
+    const next = { ...existing, ...updates };
     if (isFirebaseActive) {
-      const existing = scrollingTexts.find(t => t.id === textId);
-      if (existing) {
-        setDoc(doc(db, 'scrollingTexts', textId), { ...existing, ...updates });
-      }
-    } else {
-      setScrollingTexts((prev) => prev.map((t) => (t.id === textId ? { ...t, ...updates } : t)));
+      setDocSafe(doc(db, 'scrollingTexts', textId), next).catch(() => undefined);
     }
+    setScrollingTexts((prev) => prev.map((t) => (t.id === textId ? next : t)));
     addActivityLog('Updated scrolling text');
   };
 
   const deleteScrollingText = (textId) => {
     if (isFirebaseActive) {
-      deleteDoc(doc(db, 'scrollingTexts', textId));
-    } else {
-      setScrollingTexts((prev) => prev.filter((t) => t.id !== textId));
+      deleteDocSafe(doc(db, 'scrollingTexts', textId)).catch(() => undefined);
     }
+    setScrollingTexts((prev) => prev.filter((t) => t.id !== textId));
     addActivityLog('Deleted scrolling text');
   };
 
@@ -530,7 +597,7 @@ export const AdminProvider = ({ children }) => {
     setTestProductSettings((prev) => {
       const next = { ...prev, ...updates };
       if (isFirebaseActive) {
-        setDoc(doc(db, 'settings', 'testProduct'), next);
+        setDocSafe(doc(db, 'settings', 'testProduct'), next).catch(() => undefined);
       } else {
         writeJson(STORAGE_KEYS.testProductSettings, next);
       }
@@ -563,6 +630,7 @@ export const AdminProvider = ({ children }) => {
     addLoginHistory,
     updateCompanySettings,
     updateHomepage,
+    subscribeAdminRealtime,
     addPopup,
     updatePopup,
     deletePopup,
@@ -581,7 +649,7 @@ export const AdminProvider = ({ children }) => {
     addScrollingText,
     updateScrollingText,
     deleteScrollingText,
-  }), [banners, companySettings, homepage, notifications, popups, reviews, roles, security, activityLogs, loginHistory, deviceHistory, scrollingTexts, testProductSettings]);
+  }), [banners, companySettings, homepage, notifications, popups, reviews, roles, security, activityLogs, loginHistory, deviceHistory, scrollingTexts, testProductSettings, subscribeAdminRealtime]);
 
   return <AdminContext.Provider value={value}>{children}</AdminContext.Provider>;
 };
