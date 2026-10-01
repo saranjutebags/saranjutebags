@@ -76,6 +76,9 @@ const sanitizeDoc = (obj, keepDataUrls) => {
         cleaned.selectedImage = '';
         continue;
       }
+      // Full-resolution copies are never needed inside orders — drop them so
+      // they never become network writes at all.
+      if (key === 'fullImages') continue;
     }
     cleaned[key] = sanitizeDoc(value, keepDataUrls);
   }
@@ -93,10 +96,12 @@ export const prepareDocForWrite = (rawDoc, { keepDataUrls = false } = {}) => {
   const doc = JSON.parse(JSON.stringify(rawDoc || {}));
   const chunks = {};
 
-  // Pass 1: move big base64 payloads (images, logos) into chunks.
-  extractChunks(doc, chunks, MIN_CHUNKABLE_CHARS);
-  // Sanitize whatever remains (orders drop leftover base64 image fields).
+  // Pass 0: strip image fields this doc type must not carry (orders drop
+  // base64 images/fullImages), BEFORE chunking — so those payloads never
+  // turn into chunk writes and order saves stay fast.
   const clean = sanitizeDoc(doc, keepDataUrls);
+  // Pass 1: move remaining big base64 payloads (custom logos etc.) into chunks.
+  extractChunks(clean, chunks, MIN_CHUNKABLE_CHARS);
 
   // Pass 2 (safety): if the doc is still too big, chunk any large string.
   if (sizeOfDoc(clean) > MAX_DOC_CHARS) {

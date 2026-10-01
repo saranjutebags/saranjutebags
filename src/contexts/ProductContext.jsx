@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { db, isFirebaseActive } from '../firebase/config';
 import {
-  collection, doc, setDoc, deleteDoc, getDoc,
+  collection, doc, setDoc, deleteDoc, getDoc, updateDoc,
   query, where, orderBy, limit, startAfter, getDocs, onSnapshot,
 } from 'firebase/firestore';
 import { useAdmin } from './AdminContext';
@@ -753,8 +753,23 @@ export const ProductProvider = ({ children }) => {
     if (diff === 0) return;
 
     const type = diff > 0 ? 'Stock In' : 'Stock Out';
-    await updateProduct(productId, { stock: newStock });
-    await addInventoryLog(productId, type, Math.abs(diff), oldStock, newStock, notes);
+
+    // Update the UI instantly — never wait for the network round-trip.
+    setProducts(prev => prev.map(p => (String(p.id) === String(productId) ? { ...p, stock: newStock } : p)));
+
+    if (isFirebaseActive) {
+      try {
+        // Targeted single-field write — stock changes must never rewrite the
+        // whole product document (images, styles, etc.).
+        await updateDoc(doc(db, 'products', String(productId)), { stock: newStock });
+        invalidateCache('products');
+        bumpCatalogVersion();
+      } catch (err) {
+        console.error('Failed to update product stock:', err);
+      }
+    }
+
+    await addInventoryLog(productId, type, Math.abs(diff), oldStock, newStock, notes).catch(() => { });
   };
 
   const bulkUpdateStock = async (updates, notes = 'Bulk stock adjustment') => {

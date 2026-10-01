@@ -412,6 +412,15 @@ export const CartProvider = ({ children }) => {
       userId: uid,
       userEmail: order.userEmail || order.shippingAddress?.email || '',
       customOrder: order.customOrder || null,
+      // Orders keep item thumbnails only. Full-resolution copies are never
+      // needed after checkout — dropping them here keeps the order document
+      // small and the save instant (no multi-MB chunk writes).
+      items: (order.items || []).map(item => {
+        if (!item || typeof item !== 'object') return item;
+        const light = { ...item };
+        delete light.fullImages;
+        return light;
+      }),
       shippingAddress: {
         ...order.shippingAddress,
         email: order.shippingAddress?.email || order.userEmail || '',

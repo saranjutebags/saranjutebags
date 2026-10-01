@@ -129,6 +129,16 @@ const detectCountryCode = (phone = '') => {
   return { code: '+91', local: phone };
 };
 
+/**
+ * Reject a promise if it does not settle within `ms` milliseconds.
+ * Used around order saves so the Place Order button can NEVER appear dead.
+ */
+const withTimeout = (promise, ms, message) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+  ]);
+
 /* ──────────────────────────────────────────────── */
 
 const getCountryCodeFromAddress = (address) => {
@@ -158,6 +168,7 @@ const CheckoutView = () => {
   const [popup, setPopup] = useState(null);
   const [delhiveryCharge, setDelhiveryCharge] = useState(null);
   const [delhiveryLoading, setDelhiveryLoading] = useState(false);
+  const [placing, setPlacing] = useState(false);
 
   // Coupon state
   const [couponInput, setCouponInput] = useState('');
@@ -261,9 +272,19 @@ const CheckoutView = () => {
     setDelhiveryLoading(true);
     console.log(`[Delhivery] Calling calculateShippingCharge with origin=${warehouse.pincode}, dest=${destPin}, weight=${weightGrams}g`);
 
+    // If the shipping API does not answer quickly, fall back to the flat rate
+    // so the Place Order button can never stay stuck on "Calculating…".
+    const fallbackTimer = setTimeout(() => {
+      if (cancelled) return;
+      console.log('[Delhivery] API timed out after 8s — using fallback shipping');
+      setDelhiveryCharge(null);
+      setDelhiveryLoading(false);
+    }, 8000);
+
     calculateShippingCharge({ originPin: warehouse.pincode, destPin, weightGrams })
       .then((result) => {
         if (cancelled) return;
+        clearTimeout(fallbackTimer);
         console.log('[Delhivery] API response:', result);
         const charge = result?.total_amount;
         if (charge != null && charge > 0) {
@@ -277,13 +298,14 @@ const CheckoutView = () => {
       })
       .catch((err) => {
         if (cancelled) return;
+        clearTimeout(fallbackTimer);
         console.error('[Delhivery] API call failed:', err);
         console.log('[Delhivery] Using fallback shipping due to API failure');
         setDelhiveryCharge(null);
         setDelhiveryLoading(false);
       });
 
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(fallbackTimer); };
   }, [selectedAddress, cart, warehouse?.pincode]);
 
   const shippingDetails = useMemo(() => {
@@ -553,6 +575,8 @@ const CheckoutView = () => {
   };
 
   const handlePlaceOrder = async () => {
+    if (placing) return; // guard against double-clicks
+
     if (delhiveryLoading && !hasTestProduct) {
       setPopup({
         title: 'Calculating delivery fee...',
@@ -676,6 +700,7 @@ const CheckoutView = () => {
     }
 
     try {
+      setPlacing(true);
       order.pendingAmount = 0; // No advance for COD, full amount due on delivery
 
       if (paymentMethod === 'online') {
@@ -692,20 +717,30 @@ const CheckoutView = () => {
           return;
         }
         // order.paymentStatus is now 'Paid' (set by handler)
-        await addOrder(order);
+        await withTimeout(
+          addOrder(order),
+          30000,
+          'Saving your order is taking longer than expected. Please wait a moment and check My Orders before trying again.'
+        );
       } else {
         order.paymentStatus = 'Pending';
-        await addOrder(order);
+        await withTimeout(
+          addOrder(order),
+          30000,
+          'Saving your order is taking longer than expected. Please wait a moment and check My Orders before trying again.'
+        );
       }
 
-      // Deduct stock for each ordered item
-      for (const item of cart) {
+      // Deduct stock for each ordered item — run in parallel so many-item
+      // carts don't wait on one write at a time.
+      await Promise.all(cart.map((item) => {
         const product = products.find(p => String(p.id) === String(item.id));
         if (product && product.stock !== undefined) {
           const newStock = Math.max(0, product.stock - item.quantity);
-          await updateProductStock(item.id, newStock, `Order ${orderId} placed`).catch(() => { });
+          return updateProductStock(item.id, newStock, `Order ${orderId} placed`).catch(() => { });
         }
-      }
+        return Promise.resolve();
+      }));
 
       setLatestOrderItem(order);
       clearCart();
@@ -723,6 +758,8 @@ const CheckoutView = () => {
         primaryLabel: 'OK',
         onPrimary: () => { setPopup(null); },
       });
+    } finally {
+      setPlacing(false);
     }
   };
 
@@ -1025,12 +1062,17 @@ const CheckoutView = () => {
                 )}
                 <button
                   onClick={handlePlaceOrder}
-                  disabled={(delhiveryLoading && !hasTestProduct) || stockIssues.length > 0}
+                  disabled={(delhiveryLoading && !hasTestProduct) || stockIssues.length > 0 || placing}
                   className={`mt-6 w-full btn-primary py-3 sm:py-4 text-sm sm:text-lg font-bold flex items-center justify-center gap-2 ${
-                    (delhiveryLoading && !hasTestProduct) || stockIssues.length > 0 ? 'opacity-60 cursor-not-allowed' : ''
+                    (delhiveryLoading && !hasTestProduct) || stockIssues.length > 0 || placing ? 'opacity-60 cursor-not-allowed' : ''
                   }`}
                 >
-                  {delhiveryLoading && !hasTestProduct ? (
+                  {placing ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Placing your order…</span>
+                    </>
+                  ) : delhiveryLoading && !hasTestProduct ? (
                     <>
                       <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                       <span>Calculating delivery charge…</span>
