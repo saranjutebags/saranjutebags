@@ -46,7 +46,7 @@ const HelpFloatButton = () => {
   ];
 
   return (
-    <div className="fixed bottom-6 right-5 z-[999] flex flex-col items-end gap-3">
+    <div className="help-float-stack fixed bottom-6 right-5 z-[999] flex flex-col items-end gap-3">
       {/* Scroll to top */}
       <AnimatePresence>
         {showScrollTop && (

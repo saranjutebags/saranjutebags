@@ -13,7 +13,7 @@ const ProductView = () => {
   const { slug } = useParams();
   const location = useLocation();
   const productUrl = `${window.location.origin}${location.pathname}`;
-  const { getProductBySlug, fetchSingleProduct, addReview } = useProducts();
+  const { getProductBySlug, fetchSingleProduct, addReview, fetchProductReviews } = useProducts();
   const { addToCart, toggleWishlist, isInWishlist } = useCart();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -28,6 +28,9 @@ const ProductView = () => {
   const [newReview, setNewReview] = useState({ name: '', rating: 0, text: '' });
   const [reviewImages, setReviewImages] = useState([]);
   const [reviewImageUploading, setReviewImageUploading] = useState(false);
+  const [productReviews, setProductReviews] = useState([]);
+  const fetchReviewsRef = useRef(fetchProductReviews);
+  fetchReviewsRef.current = fetchProductReviews;
   
   // Share state
   const [showShareMenu, setShowShareMenu] = useState(false);
@@ -45,6 +48,26 @@ const ProductView = () => {
   fetchSingleRef.current = fetchSingleProduct;
 
   const product = directProduct || getProductBySlug(slug);
+
+  // Customer reviews live in their own collection now (productReviews), so the
+  // list, count and average are fetched and computed here — never from the
+  // product document.
+  useEffect(() => {
+    if (!product || !product.id) {
+      setProductReviews([]);
+      return;
+    }
+    let active = true;
+    fetchReviewsRef.current(product.id).then(list => {
+      if (active) setProductReviews((list || []).filter(r => !r.hidden));
+    });
+    return () => { active = false; };
+  }, [product?.id]);
+
+  const reviewCount = productReviews.length;
+  const reviewAvg = reviewCount > 0
+    ? productReviews.reduce((sum, r) => sum + r.rating, 0) / reviewCount
+    : 0;
 
   // Full-resolution images when available (chunked products), thumbnails otherwise.
   const displayImages = product && product.fullImages && product.fullImages.length > 0
@@ -88,11 +111,17 @@ const ProductView = () => {
     return () => { active = false; };
   }, [slug]);
 
+  // Stock drives the quantity stepper; a product without a stock number falls
+  // back to a generous ceiling so the + button is never dead.
+  const maxQuantity = product?.stock === undefined || product?.stock === null || Number.isNaN(Number(product.stock))
+    ? 9999
+    : Math.max(1, Number(product.stock));
+  const clampQuantity = (value) => Math.min(maxQuantity, Math.max(1, Math.floor(Number(value) || 1)));
+
   const handleAddToCart = () => {
-    if (!user) {
-      navigate('/auth');
-      return;
-    }
+    // Guests may fill a cart: it is kept on the device and merged into their
+    // account when they sign in. Requiring a login merely to add an item turned
+    // this button into a redirect and lost the shopper's place.
     // Cart items keep the light inline images (thumbnails) so orders stay small.
     const cartImages = product.images || [];
     const selectedImage = cartImages[Math.min(currentImage, Math.max(cartImages.length - 1, 0))] || cartImages[0];
@@ -138,12 +167,25 @@ const ProductView = () => {
       alert('Please select a rating and write a review');
       return;
     }
-    await addReview(product.id, {
-      name: newReview.name || (user ? user.displayName || user.email : 'Anonymous'),
-      rating: newReview.rating,
-      text: newReview.text,
-      images: reviewImages
-    });
+    if (!user) {
+      navigate('/auth');
+      return;
+    }
+    try {
+      const saved = await addReview(product.id, {
+        userId: user.uid,
+        name: newReview.name || user.displayName || user.email,
+        rating: newReview.rating,
+        text: newReview.text,
+        images: reviewImages
+      });
+      if (saved) {
+        setProductReviews(prev => [saved, ...prev].filter(r => !r.hidden));
+      }
+    } catch (err) {
+      alert('Could not submit your review. Please try again.');
+      return;
+    }
     setNewReview({ name: '', rating: 0, text: '' });
     setReviewImages([]);
     setShowReviewForm(false);
@@ -375,10 +417,10 @@ const ProductView = () => {
               <div className="flex items-center gap-3 mb-6">
                 <div className="flex text-yellow-400">
                   {[...Array(5)].map((_, i) => (
-                    <Star key={i} className={`w-5 h-5 ${i < Math.floor(product.rating) ? 'fill-current' : ''}`} />
+                    <Star key={i} className={`w-5 h-5 ${i < Math.floor(reviewAvg) ? 'fill-current' : ''}`} />
                   ))}
                 </div>
-                <span className="text-gray-600">({product.reviews} reviews)</span>
+                <span className="text-gray-600">({reviewCount} reviews)</span>
               </div>
               <div className="flex items-baseline gap-4 mb-8">
                 <span className="text-4xl font-bold text-gradient">₹{product.price}</span>
@@ -460,6 +502,45 @@ const ProductView = () => {
                 </div>
               </div>
             )}
+
+            {/* Quantity — was not adjustable before adding at all */}
+            <div className="glass rounded-2xl p-4 border border-emerald-100 mb-6 flex items-center justify-between gap-4">
+              <div>
+                <p className="font-semibold text-gray-800">Quantity</p>
+                <p className="text-xs text-gray-500">{maxQuantity >= 9999 ? 'No stock limit' : `${maxQuantity} in stock`}</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center border border-emerald-200 rounded-xl overflow-hidden bg-white">
+                  <button
+                    type="button"
+                    onClick={() => setQuantity(q => clampQuantity(q - 1))}
+                    className="px-4 py-2.5 text-lg font-bold text-emerald-700 hover:bg-emerald-50 active:scale-95 transition"
+                    aria-label="Decrease quantity"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min="1"
+                    max={maxQuantity}
+                    value={quantity}
+                    onChange={(event) => setQuantity(clampQuantity(event.target.value))}
+                    className="w-14 py-2.5 text-center font-bold text-gray-900 outline-none appearance-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setQuantity(q => clampQuantity(q + 1))}
+                    className="px-4 py-2.5 text-lg font-bold text-emerald-700 hover:bg-emerald-50 active:scale-95 transition"
+                    aria-label="Increase quantity"
+                  >
+                    +
+                  </button>
+                </div>
+                <span className="font-bold text-emerald-700 whitespace-nowrap">
+                  ₹{(Number(product.price || 0) * quantity).toLocaleString('en-IN')}
+                </span>
+              </div>
+            </div>
 
             <div className="flex flex-col sm:flex-row gap-4 mb-8">
               <button
@@ -627,8 +708,8 @@ const ProductView = () => {
               )}
 
               <div className="space-y-4">
-                {(product.customerReviews || []).filter(r => !r.hidden).length > 0 ? (
-                  product.customerReviews.filter(r => !r.hidden).map((review) => (
+                {productReviews.length > 0 ? (
+                  productReviews.map((review) => (
                     <div key={review.id} className="glass rounded-2xl p-6 border border-emerald-100">
                       <div className="flex items-center justify-between mb-3">
                         <h4 className="font-semibold text-gray-800">{review.name}</h4>

@@ -5,6 +5,7 @@ import { AdminProvider, useAdmin } from './contexts/AdminContext';
 import { ProductProvider } from './contexts/ProductContext';
 import { CartProvider } from './contexts/CartContext';
 import Header from './components/Header';
+import MobileBottomNav from './components/MobileBottomNav';
 import ScrollToTop from './components/ScrollToTop';
 import CartToast from './components/CartToast';
 import HelpFloatButton from './components/HelpFloatButton';
@@ -92,6 +93,7 @@ const AppShell = () => {
       }}
     >
       <Header />
+      <MobileBottomNav />
       <CartToast />
       <HelpFloatButton />
       <CouponPopup />

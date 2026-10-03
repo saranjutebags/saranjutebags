@@ -737,7 +737,7 @@ const CheckoutView = () => {
         const product = products.find(p => String(p.id) === String(item.id));
         if (product && product.stock !== undefined) {
           const newStock = Math.max(0, product.stock - item.quantity);
-          return updateProductStock(item.id, newStock, `Order ${orderId} placed`).catch(() => { });
+          return updateProductStock(item.id, newStock, `Order ${orderId} placed`, { orderId, quantity: item.quantity, action: 'place' }).catch(() => { });
         }
         return Promise.resolve();
       }));

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Menu, 
@@ -26,10 +26,31 @@ const Header = () => {
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const headerRef = useRef(null);
   const { user, userData, signOut } = useAuth();
   const { companySettings, scrollingTexts } = useAdmin();
   const { cartCount } = useCart();
   const navigate = useNavigate();
+
+  // The header is fixed and its height changes with the announcement bar, the
+  // breakpoint and the admin's scrolling-text settings. Publishing the measured
+  // height as a CSS variable is what keeps page content clear of it on every
+  // screen, instead of a guessed padding value per breakpoint.
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return undefined;
+    const publish = () => {
+      if (el.offsetHeight > 0) document.documentElement.style.setProperty('--site-header-h', `${el.offsetHeight}px`);
+    };
+    publish();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', publish);
+      return () => window.removeEventListener('resize', publish);
+    }
+    const observer = new ResizeObserver(publish);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [scrollingTexts]);
 
   if (location.pathname === '/dashboard') {
     return null;
@@ -51,14 +72,15 @@ const Header = () => {
 
   return (
     <motion.header
+      ref={headerRef}
       initial={{ y: -100 }}
       animate={{ y: 0 }}
-      className="fixed top-0 left-0 right-0 z-40 glass shadow-lg"
+      className="fixed top-0 left-0 right-0 z-40 site-header shadow-lg"
     >
       {/* Scrolling Announcement Bar */}
       {scrollingTexts && scrollingTexts.filter(t => t.active).length > 0 && (
-        <div className="relative w-screen" style={{ marginLeft: 'calc(-50vw + 50%)', marginRight: 'calc(-50vw + 50%)' }}>
-          <div className="bg-gradient-to-r from-[#163F34] via-[#1B4D3E] to-[#3E7A63] text-white text-[11px] sm:text-xs font-medium overflow-hidden h-7 sm:h-8 flex items-center">
+        <div className="relative w-full">
+          <div className="bg-gradient-to-r from-[#163F34] via-[#1B4D3E] to-[#3E7A63] text-white text-[11px] sm:text-xs font-medium overflow-hidden h-6 sm:h-8 flex items-center">
             <div className="marquee-track flex gap-12 whitespace-nowrap animate-marquee">
               {[...Array(3)].flatMap(() => scrollingTexts.filter(t => t.active)).map((t, i) => (
                 <span key={`${t.id}-${i}`} className="px-4">{t.text}</span>
@@ -68,7 +90,7 @@ const Header = () => {
         </div>
       )}
       <div className={scrollingTexts && scrollingTexts.filter(t => t.active).length > 0 ? 'max-w-7xl mx-auto px-3 sm:px-4 lg:px-8' : 'max-w-7xl mx-auto px-3 sm:px-4 lg:px-8'}>
-        <div className="flex items-center justify-between h-16 sm:h-20">
+        <div className="flex items-center justify-between h-14 sm:h-20">
           {/* Logo */}
           <Link to="/" className="flex items-center space-x-2 hover:scale-105 transition-transform min-w-0 shrink-0">
             <div className="relative shrink-0">

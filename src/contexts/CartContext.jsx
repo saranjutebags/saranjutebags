@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { db, isFirebaseActive } from '../firebase/config';
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, setDoc, updateDoc, deleteDoc, getDoc, onSnapshot } from 'firebase/firestore';
 import { sendOrderStatusNotification } from '../services/notificationService';
 import { sendOrderStatusEmail } from '../services/emailService';
 import { useAuth } from './AuthContext';
@@ -40,8 +40,61 @@ const readJson = (key, fallback) => {
   }
 };
 
+// localStorage has a hard quota, and a cart line can carry a base64 logo.
+// A failed write must never throw out of an effect and take the app down.
 const writeJson = (key, value) => {
-  localStorage.setItem(key, JSON.stringify(value));
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* quota exceeded — the Firestore copy is the durable one */
+  }
+};
+
+const lineKey = (line) => `${line?.id}::${line?.stylesKey || ''}`;
+
+const lineTotal = (line) => Number(line?.totalStyleQuantity || line?.quantity || 0);
+
+// Set a cart line to an exact unit total. Styled lines store their quantity
+// per style, so the difference is absorbed by the last styles while every
+// style keeps at least one unit — that keeps the money breakdown honest.
+const applyLineQuantity = (line, nextTotal) => {
+  const target = Math.max(1, Math.floor(Number(nextTotal) || 1));
+  const styles = Array.isArray(line.selectedStyles) ? line.selectedStyles : [];
+  if (styles.length === 0) {
+    return { ...line, quantity: target, totalStyleQuantity: target };
+  }
+  const nextStyles = styles.map(s => ({ ...s, quantity: Math.max(1, Math.floor(Number(s.quantity) || 1)) }));
+  let delta = target - nextStyles.reduce((sum, s) => sum + s.quantity, 0);
+  if (delta > 0) {
+    nextStyles[nextStyles.length - 1].quantity += delta;
+  } else {
+    for (let i = nextStyles.length - 1; i >= 0 && delta < 0; i--) {
+      const reducible = nextStyles[i].quantity - 1;
+      const take = Math.min(reducible, -delta);
+      nextStyles[i].quantity -= take;
+      delta += take;
+    }
+  }
+  const total = nextStyles.reduce((sum, s) => sum + s.quantity, 0);
+  return {
+    ...line,
+    selectedStyles: nextStyles.map(s => ({ ...s, total: (Number(s.price) || 0) * s.quantity })),
+    quantity: total,
+    totalStyleQuantity: total,
+  };
+};
+
+// Union of two carts by line, keeping the larger quantity per line, so a
+// device that still holds a local cart never loses it to the server copy.
+const mergeCartLines = (a = [], b = []) => {
+  const merged = new Map();
+  [...a, ...b].forEach(line => {
+    if (!line || line.id === undefined || line.id === null) return;
+    const key = lineKey(line);
+    const seen = merged.get(key);
+    if (!seen || lineTotal(line) > lineTotal(seen)) merged.set(key, line);
+  });
+  return [...merged.values()];
 };
 
 export const useCart = () => {
@@ -246,7 +299,61 @@ export const CartProvider = ({ children }) => {
   }, []);
 
 
-  useEffect(() => { writeJson(STORAGE_KEYS.cart, cart); }, [cart]);
+  // ─── Cart persistence ──────────────────────────────────────────────────────
+  // localStorage keeps the cart on this device (and across a sign-out), while
+  // a signed-in customer also gets a Firestore copy at users/{uid}/cart so the
+  // cart follows them to another phone or browser.
+  const cartLoadedFor = useRef(null);
+
+  useEffect(() => {
+    writeJson(STORAGE_KEYS.cart, cart);
+    if (uid) writeJson(userStorageKey(uid, 'cart'), cart);
+  }, [cart, uid]);
+
+  useEffect(() => {
+    if (!uid) { cartLoadedFor.current = null; return; undefined; }
+    let cancelled = false;
+    // Nothing may be pushed to the server until this merge has finished,
+    // otherwise an empty first render could wipe the saved cart.
+    cartLoadedFor.current = null;
+
+    const localForUser = readJson(userStorageKey(uid, 'cart'), []);
+    const deviceCart = readJson(STORAGE_KEYS.cart, []);
+
+    // Lines are unioned by product + style set, keeping the larger quantity,
+    // so a cart held on this device is never lost to the stored copy.
+    const mergeIn = (serverItems) => {
+      if (cancelled) return;
+      setCart(prev => mergeCartLines(mergeCartLines(deviceCart, localForUser), serverItems));
+      cartLoadedFor.current = uid;
+    };
+
+    if (!isFirebaseActive) {
+      mergeIn([]);
+      return () => { cancelled = true; };
+    }
+
+    getDoc(doc(db, 'users', uid, 'cart', 'cart'))
+      .then(snap => mergeIn(snap.exists() ? (snap.data()?.items || []) : []))
+      .catch(() => mergeIn([]));
+
+    return () => { cancelled = true; };
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid || !isFirebaseActive) return undefined;
+    if (cartLoadedFor.current !== uid) return undefined;
+    // Debounced: quantity taps should not write one document per click.
+    const timer = setTimeout(() => {
+      setDocSafe(doc(db, 'users', uid, 'cart', 'cart'), {
+        id: 'cart',
+        userId: uid,
+        items: cart,
+        updatedAt: Date.now(),
+      }).catch(err => console.warn('Cart could not be saved:', err?.message || err));
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [cart, uid]);
   useEffect(() => { writeJson(STORAGE_KEYS.wishlist, wishlist); }, [wishlist]);
 
   // latestOrder is Firebase-only — no localStorage cache
@@ -266,8 +373,10 @@ export const CartProvider = ({ children }) => {
   // ─── Cart ────────────────────────────────────────────────────────────────────
   const addToCart = (product, quantity = 1, customText = '', customLogo = '', selectedStyles = null, customDescription = '') => {
     let blocked = false;
+    let addedQuantity = quantity;
     setCart(prev => {
-      if (product.stock !== undefined && product.stock <= 0) {
+      const stock = product.stock === undefined || product.stock === null ? Infinity : Number(product.stock);
+      if (stock <= 0) {
         blocked = true;
         setCartToast({ id: product.id, name: product.name, quantity: 0, error: 'Out of stock' });
         return prev;
@@ -281,21 +390,21 @@ export const CartProvider = ({ children }) => {
         item.stylesKey === stylesKey
       );
       if (existingIndex > -1) {
-        const newQty = prev[existingIndex].quantity + quantity;
-        if (product.stock !== undefined && newQty > product.stock) {
+        const existing = prev[existingIndex];
+        // Never reject the whole add because the cart would exceed stock —
+        // top the line up to the largest legal quantity instead.
+        const nextTotal = Math.min(lineTotal(existing) + quantity, stock);
+        if (nextTotal <= lineTotal(existing)) {
           blocked = true;
-          setCartToast({ id: product.id, name: product.name, quantity: 0, error: `Only ${product.stock} available` });
+          setCartToast({ id: product.id, name: product.name, quantity: 0, error: `Only ${stock} available — already in your cart` });
           return prev;
         }
+        addedQuantity = nextTotal - lineTotal(existing);
         const updated = [...prev];
-        updated[existingIndex].quantity = newQty;
+        updated[existingIndex] = applyLineQuantity(existing, nextTotal);
         return updated;
       }
-      if (product.stock !== undefined && quantity > product.stock) {
-        blocked = true;
-        setCartToast({ id: product.id, name: product.name, quantity: 0, error: `Only ${product.stock} available` });
-        return prev;
-      }
+      addedQuantity = Math.min(quantity, stock);
       const newItem = { 
         ...product, 
         quantity, 
@@ -305,29 +414,53 @@ export const CartProvider = ({ children }) => {
         selectedStyles: selectedStyles || [],
         stylesKey,
         // Calculate total price based on styles: base price * total quantity across all styles
-        totalStyleQuantity: selectedStyles ? selectedStyles.reduce((sum, s) => sum + (s.quantity || 1), 0) : quantity,
+        totalStyleQuantity: selectedStyles ? selectedStyles.reduce((sum, s) => sum + (s.quantity || 1), 0) : addedQuantity,
         effectivePrice: product.price // base price per unit
       };
+      newItem.quantity = addedQuantity;
       // Cart items keep the light inline images only — full-resolution copies
       // would bloat localStorage and every order document.
       delete newItem.fullImages;
       return [...prev, newItem];
     });
     if (!blocked) {
-      setCartToast({ id: product.id, name: product.name, quantity });
+      setCartToast({ id: product.id, name: product.name, quantity: addedQuantity });
     }
   };
 
-  const updateQuantity = (productId, quantity) => {
-    if (quantity <= 0) { removeFromCart(productId); return; }
-    setCart(prev => prev.map(item => item.id === productId ? { ...item, quantity } : item));
+  // stylesKey targets one specific cart line, so the same product ordered in
+  // two style sets can be adjusted independently.
+  const updateQuantity = (productId, quantity, stylesKey = null) => {
+    if (quantity <= 0) { removeFromCart(productId, stylesKey); return; }
+    setCart(prev => prev.map(item => {
+      if (String(item.id) !== String(productId)) return item;
+      if (stylesKey !== null && (item.stylesKey || '') !== stylesKey) return item;
+      const stock = item.stock === undefined || item.stock === null ? Infinity : Number(item.stock);
+      const max = Number.isFinite(stock) ? Math.max(1, stock) : Number.MAX_SAFE_INTEGER;
+      const wanted = Math.max(1, Math.floor(Number(quantity) || 1));
+      if (wanted > max) {
+        setCartToast({ id: item.id, name: item.name, quantity: 0, error: `Only ${max} in stock` });
+      }
+      return applyLineQuantity(item, Math.min(wanted, max));
+    }));
   };
 
-  const removeFromCart = (productId) => {
-    setCart(prev => prev.filter(item => item.id !== productId));
+  const removeFromCart = (productId, stylesKey = null) => {
+    setCart(prev => prev.filter(item => {
+      if (String(item.id) !== String(productId)) return true;
+      // Without a line key the caller means "this product, every variant".
+      if (stylesKey === null) return false;
+      return (item.stylesKey || '') !== stylesKey;
+    }));
   };
 
-  const clearCart = () => { setCart([]); };
+  const clearCart = () => {
+    setCart([]);
+    // An ordered cart must not linger in the customer's Firestore copy.
+    if (uid && isFirebaseActive) {
+      deleteDoc(doc(db, 'users', uid, 'cart', 'cart')).catch(() => undefined);
+    }
+  };
 
   // ─── Addresses (user-scoped) ─────────────────────────────────────────────────
   const addAddress = (address) => {
@@ -463,7 +596,7 @@ export const CartProvider = ({ children }) => {
     sendOrderStatusEmail(nextOrder, nextOrder.status).catch(err => console.error('Email send error:', err));
   };
 
-  const updateOrder = async (orderId, updates, existingOrder = null) => {
+  const updateOrder = async (orderId, updates, existingOrder = null, options = {}) => {
     const existing = existingOrder || orders.find(order => order.id === orderId);
     if (!existing) return;
 
@@ -500,20 +633,48 @@ export const CartProvider = ({ children }) => {
 
     const orderUserId = existing.userId || uid;
 
+    // A cancellation only ever needs the cancellation fields. Rewriting the
+    // whole document would also re-normalise the addresses and re-chunk the
+    // order images — work the security rules (rightly) refuse from a customer,
+    // and which nobody wants on a cancel click. So this path patches fields.
+    const cancelPatch = options.minimal ? {
+      status: newStatus,
+      orderTimeline: newTimeline,
+      ...(updates.cancelReason !== undefined ? { cancelReason: updates.cancelReason } : {}),
+      ...(updates.cancelledAt !== undefined ? { cancelledAt: updates.cancelledAt } : {}),
+    } : null;
+
     if (isFirebaseActive) {
       try {
-        // If the order was stored chunked, re-attach its chunked data first so
-        // the rewrite keeps the customer's uploaded images/logos intact.
-        let source = nextOrder;
-        if (existing.__chunked) {
-          const hydrated = await hydrateOrder(existing, orderUserId);
-          source = { ...hydrated, ...nextOrder };
-        }
-        await setDocSafe(doc(db, 'orders', orderId), source);
-        if (orderUserId) {
-          await setDocSafe(doc(db, 'users', orderUserId, 'orders', orderId), source).catch(err =>
-            console.error('Failed to update user order copy:', err)
-          );
+        if (cancelPatch) {
+          try {
+            await updateDoc(doc(db, 'orders', orderId), cancelPatch);
+          } catch (mirrorErr) {
+            // An order that never got its admin mirror must still be
+            // cancellable, so only a missing document is tolerated here.
+            // Permission problems are re-thrown, never hidden.
+            if (!['not-found', 'failed-precondition'].includes(mirrorErr?.code)) throw mirrorErr;
+            console.warn('No admin mirror to update for this order:', mirrorErr?.code);
+          }
+          if (orderUserId) {
+            await updateDoc(doc(db, 'users', orderUserId, 'orders', orderId), cancelPatch).catch(err =>
+              console.error('Failed to update user order copy:', err)
+            );
+          }
+        } else {
+          // If the order was stored chunked, re-attach its chunked data first
+          // so the rewrite keeps the customer's uploaded images/logos intact.
+          let source = nextOrder;
+          if (existing.__chunked) {
+            const hydrated = await hydrateOrder(existing, orderUserId);
+            source = { ...hydrated, ...nextOrder };
+          }
+          await setDocSafe(doc(db, 'orders', orderId), source);
+          if (orderUserId) {
+            await setDocSafe(doc(db, 'users', orderUserId, 'orders', orderId), source).catch(err =>
+              console.error('Failed to update user order copy:', err)
+            );
+          }
         }
       } catch (err) {
         console.error('Failed to update order:', err);
@@ -537,7 +698,7 @@ export const CartProvider = ({ children }) => {
       status: 'Cancelled',
       cancelReason,
       cancelledAt: new Date().toLocaleString(),
-    });
+    }, null, { minimal: true });
   };
 
   const deleteOrders = async (orderIds) => {

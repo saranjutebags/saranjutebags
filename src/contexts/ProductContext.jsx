@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { db, isFirebaseActive } from '../firebase/config';
+import { db, auth, isFirebaseActive } from '../firebase/config';
 import {
   collection, doc, setDoc, deleteDoc, getDoc, updateDoc,
   query, where, orderBy, limit, startAfter, getDocs, onSnapshot,
@@ -744,32 +744,73 @@ export const ProductProvider = ({ children }) => {
     }
   };
 
-  const updateProductStock = async (productId, stock, notes = 'Manual stock adjustment') => {
+  const updateProductStock = async (productId, stock, notes = 'Manual stock adjustment', meta = null) => {
     const product = products.find(p => String(p.id) === String(productId));
     if (!product) return;
     const oldStock = product.stock;
     const newStock = Math.max(0, Number(stock) || 0);
     const diff = newStock - oldStock;
-    if (diff === 0) return;
+
+    // Order-driven adjustments must always reach the server, even when our
+    // local copy shows no difference — the server owns the real stock number.
+    const isOrderFlow = Boolean(meta && meta.orderId);
+    if (diff === 0 && !isOrderFlow) return;
 
     const type = diff > 0 ? 'Stock In' : 'Stock Out';
 
     // Update the UI instantly — never wait for the network round-trip.
     setProducts(prev => prev.map(p => (String(p.id) === String(productId) ? { ...p, stock: newStock } : p)));
 
-    if (isFirebaseActive) {
-      try {
-        // Targeted single-field write — stock changes must never rewrite the
-        // whole product document (images, styles, etc.).
+    if (!isFirebaseActive) return;
+
+    try {
+      if (isOrderFlow) {
+        // Customer flow: the browser only names the ORDER, never a stock value.
+        // The serverless function reads the ordered quantity from that order
+        // document, computes the new stock itself and writes it with the Admin
+        // SDK — so customers cannot set stock numbers or replay an adjustment.
+        const currentUser = auth.currentUser;
+        const idToken = currentUser ? await currentUser.getIdToken(true).catch(() => null) : null;
+        if (!idToken) throw new Error('Sign in required to adjust stock');
+        const response = await fetch('/api/update-stock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            idToken,
+            productId: String(productId),
+            orderId: String(meta.orderId),
+            action: meta.action || (diff < 0 ? 'place' : 'cancel'),
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (response.status === 404 && import.meta.env.DEV) {
+          // Vite's dev server does not run serverless functions, so
+          // /api/update-stock only exists once deployed (or under
+          // `npx vercel dev`). The optimistic UI number stays, and nothing is
+          // written to Firestore — which is exactly how it should be.
+          console.warn('[stock] Skipped in local dev — use "npx vercel dev" or a deployment to apply stock changes');
+          return;
+        }
+        if (!response.ok && !payload.idempotent) {
+          throw new Error(payload.message || 'Stock update failed');
+        }
+        if (typeof payload.stock === 'number') {
+          setProducts(prev => prev.map(p => (String(p.id) === String(productId) ? { ...p, stock: payload.stock } : p)));
+        }
+        // The function already wrote the inventory log and bumped the catalog
+        // version, so the client skips both here.
+        invalidateCache('products');
+      } else {
+        // Admin flow: targeted single-field write — stock changes must never
+        // rewrite the whole product document (images, styles, etc.).
         await updateDoc(doc(db, 'products', String(productId)), { stock: newStock });
         invalidateCache('products');
         bumpCatalogVersion();
-      } catch (err) {
-        console.error('Failed to update product stock:', err);
+        await addInventoryLog(productId, type, Math.abs(diff), oldStock, newStock, notes).catch(() => { });
       }
+    } catch (err) {
+      console.error('Failed to update product stock:', err);
     }
-
-    await addInventoryLog(productId, type, Math.abs(diff), oldStock, newStock, notes).catch(() => { });
   };
 
   const bulkUpdateStock = async (updates, notes = 'Bulk stock adjustment') => {
@@ -821,7 +862,7 @@ export const ProductProvider = ({ children }) => {
 
   const addReview = async (productId, reviewData) => {
     const product = allProducts.find(p => String(p.id) === String(productId));
-    if (!product) return;
+    if (!product) return null;
 
     // Strip base64 review images that are too large for Firestore (1MB doc limit)
     const safeImages = (reviewData.images || []).filter(img => {
@@ -830,10 +871,13 @@ export const ProductProvider = ({ children }) => {
         return false;
       }
       return true;
-    });
+    }).slice(0, 3);
 
     const newReview = {
-      id: Date.now(),
+      id: `rev-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      productId: String(product.id),
+      productName: product.name,
+      userId: reviewData.userId || '',
       name: reviewData.name || 'Anonymous',
       rating: reviewData.rating,
       text: reviewData.text,
@@ -842,41 +886,71 @@ export const ProductProvider = ({ children }) => {
       date: new Date().toLocaleDateString()
     };
 
-    const updatedReviews = [...(product.customerReviews || []), newReview];
-    const avgRating = updatedReviews.reduce((sum, r) => sum + r.rating, 0) / updatedReviews.length;
-    const reviewCount = (product.reviews || 0) + 1;
+    // Each review is its own document under productReviews, so no customer
+    // can ever overwrite another customer's review or touch product fields.
+    if (isFirebaseActive) {
+      await setDoc(doc(db, 'productReviews', newReview.id), newReview);
 
-    await updateProduct(product.id, {
-      customerReviews: updatedReviews,
-      rating: avgRating,
-      reviews: reviewCount
-    });
+      // Keep the card-level rating aggregates on the product doc in sync
+      // (numbers only — Firestore rules allow just these two fields).
+      try {
+        const reviews = await fetchProductReviews(String(product.id));
+        const visible = reviews.filter(r => !r.hidden);
+        const avgRating = visible.length > 0
+          ? visible.reduce((sum, r) => sum + r.rating, 0) / visible.length
+          : 0;
+        await updateDoc(doc(db, 'products', String(product.id)), {
+          rating: avgRating,
+          reviews: visible.length,
+        });
+      } catch (err) {
+        console.warn('[Review] Aggregate sync skipped:', err?.message || err);
+      }
+    }
+
+    invalidateByPrefix('product/');
+    return newReview;
   };
 
-  const deleteProductReview = (productId, reviewId) => {
-    const product = products.find(p => String(p.id) === String(productId));
-    if (product) {
-      const updatedReviews = (product.customerReviews || []).filter(r => r.id !== reviewId);
-      const avgRating = updatedReviews.length > 0
-        ? updatedReviews.reduce((sum, r) => sum + r.rating, 0) / updatedReviews.length
-        : 0;
-      const reviewCount = Math.max(0, (product.reviews || 0) - 1);
-
-      updateProduct(productId, {
-        customerReviews: updatedReviews,
-        rating: avgRating,
-        reviews: reviewCount
-      });
+  // Load one product's reviews (newest first) from the productReviews store.
+  const fetchProductReviews = async (productId) => {
+    if (!isFirebaseActive) return [];
+    try {
+      const q = query(collection(db, 'productReviews'), where('productId', '==', String(productId)));
+      const snap = await getDocs(q);
+      const docs = [];
+      snap.forEach(d => docs.push({ ...d.data(), id: d.id }));
+      docs.sort((a, b) => String(b.id || '').localeCompare(String(a.id || '')));
+      return docs;
+    } catch (err) {
+      console.warn('Failed to load product reviews:', err);
+      return [];
     }
   };
 
-  const toggleReviewVisibility = (productId, reviewId) => {
-    const product = products.find(p => String(p.id) === String(productId));
-    if (product) {
-      const updatedReviews = (product.customerReviews || []).map(r =>
-        r.id === reviewId ? { ...r, hidden: !r.hidden } : r
-      );
-      updateProduct(productId, { customerReviews: updatedReviews });
+  // Load every review for the admin moderation table.
+  const fetchAllProductReviews = async () => {
+    if (!isFirebaseActive) return [];
+    try {
+      const snap = await getDocs(collection(db, 'productReviews'));
+      const docs = [];
+      snap.forEach(d => docs.push({ ...d.data(), id: d.id }));
+      return docs;
+    } catch (err) {
+      console.warn('Failed to load all product reviews:', err);
+      return [];
+    }
+  };
+
+  const deleteProductReview = async (reviewId) => {
+    if (isFirebaseActive) {
+      await deleteDoc(doc(db, 'productReviews', String(reviewId)));
+    }
+  };
+
+  const toggleReviewVisibility = async (reviewId, nextHidden) => {
+    if (isFirebaseActive) {
+      await updateDoc(doc(db, 'productReviews', String(reviewId)), { hidden: Boolean(nextHidden) });
     }
   };
 
@@ -912,6 +986,8 @@ export const ProductProvider = ({ children }) => {
     deleteCategory,
     toggleCategoryVisibility,
     addReview,
+    fetchProductReviews,
+    fetchAllProductReviews,
     deleteProductReview,
     toggleReviewVisibility,
   }), [categories, allProducts, inventoryHistory, loading, productsError, loadingMore, hasMore, loadMoreProducts, refreshProducts, fetchSingleProduct]);

@@ -6,6 +6,7 @@ import { collection, doc, setDoc, deleteDoc, onSnapshot, getDoc } from 'firebase
 import { useAdmin } from '../contexts/AdminContext';
 import { useProducts } from '../contexts/ProductContext';
 import { useCart } from '../contexts/CartContext';
+import { buildInvoiceHTML, billToInvoice, printInvoiceHtml } from '../utils/invoiceDocument';
 
 const emptyCustomer = {
   name: '',
@@ -111,115 +112,14 @@ const BillGenerator = ({ showMessage }) => {
     return true;
   };
 
-  // ─── Invoice HTML ───────────────────────────────────────────────
-  const buildInvoiceHTML = (bill) => {
-    const c = bill.customer;
-    const co = companySettings;
-    const items = bill.items;
-    const sub = items.reduce((s, i) => s + i.price * i.quantity, 0);
-    const gst = Math.round(sub * (GST_RATE / 100) * 100) / 100;
-    const total = Math.round((sub + gst) * 100) / 100;
+  // ─── Invoice document ────────────────────────────────────────────────
+  // Shares the template with customer order invoices and the sales register.
+  const invoiceHtml = (bill) => buildInvoiceHTML(billToInvoice(bill), companySettings);
 
-    return `
-      <div style="font-family: Arial, sans-serif; padding: 30px; max-width: 800px; margin: 0 auto; color: #222;">
-        <div style="background: linear-gradient(135deg, #0F766E, #16A34A); padding: 25px; border-radius: 12px; margin-bottom: 25px; color: #fff; display: flex; align-items: center; gap: 18px;">
-          ${co?.logo ? `<img src="${co.logo}" alt="Logo" style="width: 72px; height: 72px; object-fit: contain; background: #fff; border-radius: 10px; padding: 5px;" />` : ''}
-          <div>
-            <h1 style="margin: 0; font-size: 26px;">${co?.companyName || 'Saran Jute Bags'}</h1>
-            <p style="margin: 6px 0 0 0; font-size: 13px; color: #E8FFF4;">${co?.addressLine1 || ''}${co?.cityStatePin ? `, ${co.cityStatePin}` : ''}</p>
-            <p style="margin: 4px 0 0 0; font-size: 13px; color: #E8FFF4;">Mobile: ${co?.phone || '—'} | Email: ${co?.email || '—'}</p>
-            <p style="margin: 4px 0 0 0; font-size: 13px; color: #E8FFF4;">Website: www.saranjutebags.in | www.saranjutebags.co.in</p>
-            ${co?.gstin ? `<p style="margin: 4px 0 0 0; font-size: 12px; color: #E8FFF4;">GSTIN: ${co.gstin}</p>` : ''}
-            ${co?.pan ? `<p style="margin: 4px 0 0 0; font-size: 12px; color: #E8FFF4;">PAN: ${co.pan}</p>` : ''}
-          </div>
-        </div>
-
-        <div style="display: flex; justify-content: space-between; margin-bottom: 25px; flex-wrap: wrap; gap: 15px;">
-          <div>
-            <h3 style="margin: 0 0 8px 0;">Tax Invoice</h3>
-            <p style="margin: 3px 0; font-size: 13px;"><strong>Bill No:</strong> ${bill.billNumber}</p>
-            <p style="margin: 3px 0; font-size: 13px;"><strong>Date:</strong> ${bill.date}</p>
-            <p style="margin: 3px 0; font-size: 13px;"><strong>Time:</strong> ${bill.time}</p>
-          </div>
-          <div style="text-align: right;">
-            <h3 style="margin: 0 0 8px 0;">Bill To:</h3>
-            <p style="margin: 3px 0; font-size: 13px;"><strong>${c.name}</strong></p>
-            <p style="margin: 3px 0; font-size: 13px;">Mobile: ${c.phone}</p>
-            ${c.email ? `<p style="margin: 3px 0; font-size: 13px;">Email: ${c.email}</p>` : ''}
-            ${c.address ? `<p style="margin: 3px 0; font-size: 13px;">${c.address}${c.city ? `, ${c.city}` : ''}${c.state ? `, ${c.state}` : ''}${c.pincode ? ` - ${c.pincode}` : ''}</p>` : ''}
-          </div>
-        </div>
-
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
-          <thead>
-            <tr style="background-color: #EEF4F1;">
-              <th style="padding: 10px; text-align: left; border: 1.5px solid #333;">#</th>
-              <th style="padding: 10px; text-align: left; border: 1.5px solid #333;">Item</th>
-              <th style="padding: 10px; text-align: center; border: 1.5px solid #333;">Qty</th>
-              <th style="padding: 10px; text-align: right; border: 1.5px solid #333;">Price</th>
-              <th style="padding: 10px; text-align: right; border: 1.5px solid #333;">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${items.map((item, idx) => `
-              <tr>
-                <td style="padding: 10px; border: 1.5px solid #333; text-align: center;">${idx + 1}</td>
-                <td style="padding: 10px; border: 1.5px solid #333;">${item.name}</td>
-                <td style="padding: 10px; border: 1.5px solid #333; text-align: center;">${item.quantity}</td>
-                <td style="padding: 10px; border: 1.5px solid #333; text-align: right;">₹${Number(item.price).toFixed(2)}</td>
-                <td style="padding: 10px; border: 1.5px solid #333; text-align: right;">₹${(item.price * item.quantity).toFixed(2)}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-
-        <div style="margin-left: auto; width: 280px; margin-bottom: 30px;">
-          <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
-            <span>Subtotal:</span><span>₹${sub.toFixed(2)}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
-            <span>GST (${GST_RATE}%):</span><span>₹${gst.toFixed(2)}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; padding: 10px 0; font-size: 18px; font-weight: bold; border-top: 2px solid #16A34A; margin-top: 6px;">
-            <span>Grand Total:</span><span>₹${total.toFixed(2)}</span>
-          </div>
-        </div>
-
-        <div style="margin-top: 50px; display: flex; justify-content: flex-start;">
-          <div style="text-align: center;">
-            <div style="width: 220px; border-top: 1px solid #333; margin-bottom: 6px;"></div>
-            <p style="margin: 0; font-size: 13px; font-weight: bold; color: #222;">Authorized Signatory</p>
-            <p style="margin: 2px 0 0 0; font-size: 12px; color: #666;">For ${co?.companyName || 'Saran Jute Bags'}</p>
-          </div>
-        </div>
-
-        <div style="border-top: 1px solid #eee; padding-top: 20px; margin-top: 25px; text-align: center; color: #666; font-size: 12px;">
-          <p style="margin: 5px 0;">Thank you for your business!</p>
-          <p style="margin: 5px 0;">This is computer generated bill.</p>
-        </div>
-      </div>
-    `;
-  };
-
-  // ─── Print ──────────────────────────────────────────────────────
   const printBill = (bill) => {
-    const printWindow = window.open('', '_blank', 'width=900,height=700');
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>${bill.billNumber}</title>
-          <style>
-            body { margin: 0; }
-            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-            table, th, td { border-color: #333 !important; }
-          </style>
-        </head>
-        <body>${buildInvoiceHTML(bill)}
-        <script>window.onload = () => setTimeout(() => window.print(), 400);</script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+    if (!printInvoiceHtml({ html: invoiceHtml(bill), title: bill.billNumber })) {
+      showMessage('Please allow pop-ups to print this bill', 'error');
+    }
   };
 
   // ─── Save bill ──────────────────────────────────────────────────
@@ -409,7 +309,7 @@ const BillGenerator = ({ showMessage }) => {
                 <button onClick={() => setPreviewBill(null)} className="p-2 bg-red-600 text-white rounded-full hover:bg-red-700"><X className="w-5 h-5" /></button>
               </div>
               <div className="flex-1 overflow-y-auto p-4">
-                <div dangerouslySetInnerHTML={{ __html: buildInvoiceHTML(previewBill) }} />
+                <div dangerouslySetInnerHTML={{ __html: invoiceHtml(previewBill) }} />
               </div>
               <div className="flex gap-3 p-4 border-t justify-end">
                 <button onClick={() => printBill(previewBill)} className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700 flex items-center gap-2">

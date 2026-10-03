@@ -1,13 +1,13 @@
 import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { AlertTriangle, ArrowLeft, ExternalLink, MapPin, ShoppingBag, Truck, X, Download, Eye } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ExternalLink, MapPin, ShoppingBag, Truck, X, Download, Eye, Printer } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useCart } from '../contexts/CartContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useAdmin } from '../contexts/AdminContext';
 import { useProducts } from '../contexts/ProductContext';
 import { getItemImage } from '../utils/orderImageUtils';
-import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+import { buildInvoiceHTML, orderToInvoice, exportInvoicePdf, printInvoiceHtml } from '../utils/invoiceDocument';
 import { isDelhiveryActive, trackOrder } from '../services/delhivery';
 
 const trackingSteps = [
@@ -50,17 +50,29 @@ const getTrackingStageIndex = (order) => {
 const OrderInfoView = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { orders, cancelOrder } = useCart();
+  const { orders, cancelOrder, pricingSettings } = useCart();
+  const { loading: authLoading } = useAuth();
   const { companySettings } = useAdmin();
   const { products, updateProductStock } = useProducts();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState(cancelReasons[0]);
   const [otherReason, setOtherReason] = useState('');
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [invoiceBusy, setInvoiceBusy] = useState(false);
   const [trackingInfo, setTrackingInfo] = useState(null);
   const [trackingLoading, setTrackingLoading] = useState(false);
 
   const order = useMemo(() => orders.find((item) => item.id === id), [id, orders]);
+
+  // A refreshed or shared /orders/:id link lands here before the order list has
+  // arrived from Firestore, so give the sync a moment instead of immediately
+  // telling the customer their order does not exist.
+  const [ordersHaveSettled, setOrdersHaveSettled] = useState(false);
+  useEffect(() => {
+    if (order) { setOrdersHaveSettled(true); return undefined; }
+    const timer = setTimeout(() => setOrdersHaveSettled(true), 2500);
+    return () => clearTimeout(timer);
+  }, [order]);
 
   useEffect(() => {
     if (!order?.trackingNumber || !isDelhiveryActive()) {
@@ -76,6 +88,16 @@ const OrderInfoView = () => {
   }, [order?.trackingNumber]);
 
   if (!order) {
+    if (authLoading || !ordersHaveSettled) {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16 flex items-center justify-center">
+          <div className="glass rounded-3xl p-10 border border-emerald-100 text-center max-w-md mx-4">
+            <div className="w-12 h-12 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin mx-auto mb-4" />
+            <h1 className="text-xl font-bold text-gray-800">Loading your order…</h1>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-mint-50 pt-32 sm:pt-36 pb-16 flex items-center justify-center">
         <div className="glass rounded-3xl p-10 border border-emerald-100 text-center max-w-md mx-4">
@@ -93,173 +115,31 @@ const OrderInfoView = () => {
   const heroGif = order.status === 'Cancelled'
     ? '/cancel.gif'
     : trackingSteps[Math.max(currentStageIndex, 0)]?.gif || '/confirmed.gif';
-  const orderPricing = order.pricing || {
-    subtotal: order.subtotal ?? order.total,
-    discountAmount: order.discountAmount ?? 0,
-    shipping: order.shippingCharge ?? 0,
-    gstRate: order.gstRate ?? 0,
-    gstAmount: order.gstAmount ?? 0,
-    grandTotal: order.grandTotal ?? order.total,
-  };
+  // One template for every invoice in the app: the customer's bill and the
+  // admin's copy of the same order are now byte-for-byte the same document.
+  const invoiceHtml = buildInvoiceHTML(
+    orderToInvoice(order, {
+      invoicePrefix: companySettings.invoicePrefix || 'INV',
+      gstRate: Number(pricingSettings?.gstRate) || 18,
+    }),
+    companySettings,
+  );
+  const invoiceFileName = `${companySettings.invoicePrefix || 'INV'}-${order.id}.pdf`;
 
   const downloadInvoicePdf = async () => {
-    const openModal = async () => {
-      setShowInvoiceModal(true);
-      // Wait for DOM to update
-      await new Promise(resolve => setTimeout(resolve, 100));
-      return document.getElementById('invoice-content');
-    };
-
-    let invoiceElement = document.getElementById('invoice-content');
-    if (!invoiceElement) {
-      invoiceElement = await openModal();
-    }
-
-    if (!invoiceElement) {
-      console.error('Invoice element not found');
-      return;
-    }
-
+    setInvoiceBusy(true);
     try {
-      const canvas = await html2canvas(invoiceElement, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
-      });
-      
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgWidth = 210;
-      const pageHeight = 297;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      
-      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
-      pdf.save(`${companySettings.invoicePrefix || 'INV'}-${order.id}.pdf`);
+      await exportInvoicePdf({ html: invoiceHtml, filename: invoiceFileName });
     } catch (error) {
       console.error('Invoice download error:', error);
+    } finally {
+      setInvoiceBusy(false);
     }
   };
 
-  const InvoiceHTML = () => (
-    <div id="invoice-content" className="bg-white p-8 max-w-2xl mx-auto" style={{ fontFamily: 'Arial, sans-serif' }}>
-      {/* Header */}
-      <div style={{ background: 'linear-gradient(135deg, #0F766E, #16A34A)', padding: '35px', borderRadius: '14px', marginBottom: '30px' }}>
-        <h1 style={{ margin: 0, color: '#fff', fontSize: '30px' }}>{companySettings.companyName}</h1>
-        <p style={{ marginTop: '8px', color: '#E8FFF4', fontSize: '15px' }}>Premium Eco-Friendly Packaging Solutions</p>
-      </div>
-
-      {/* Invoice Details */}
-      <div style={{ marginBottom: '30px' }}>
-        <p><strong>Invoice No:</strong> {companySettings.invoicePrefix}-{order.id.slice(-6)}</p>
-        <p><strong>Invoice Date:</strong> {order.date}</p>
-        <p><strong>Order ID:</strong> {order.id}</p>
-        <p><strong>Payment Method:</strong> {order.paymentMethod}</p>
-      </div>
-
-      {/* Company Details */}
-      <div style={{ marginBottom: '30px', padding: '20px', backgroundColor: '#f8fafc', borderRadius: '8px' }}>
-        <h3 style={{ margin: '0 0 10px 0', color: '#222' }}>Bill To:</h3>
-        <p style={{ margin: '5px 0' }}><strong>{order.shippingAddress.name}</strong></p>
-        <p style={{ margin: '5px 0' }}>{order.shippingAddress.addressLine1}</p>
-        <p style={{ margin: '5px 0' }}>{order.shippingAddress.city}, {order.shippingAddress.state} - {order.shippingAddress.pincode}</p>
-        <p style={{ margin: '5px 0' }}>Phone: {order.shippingAddress.phone}</p>
-      </div>
-
-      {/* Items */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '30px' }}>
-        <thead>
-          <tr style={{ backgroundColor: '#f8fafc' }}>
-            <th style={{ padding: '12px', textAlign: 'left', border: '1px solid #ececec' }}>Item</th>
-            <th style={{ padding: '12px', textAlign: 'center', border: '1px solid #ececec' }}>Qty</th>
-            <th style={{ padding: '12px', textAlign: 'right', border: '1px solid #ececec' }}>Price</th>
-            <th style={{ padding: '12px', textAlign: 'right', border: '1px solid #ececec' }}>Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {order.items.map((item, index) => {
-            const hasStyles = item.selectedStyles && item.selectedStyles.length > 0;
-            const totalQty = item.totalStyleQuantity || item.quantity;
-            const itemTotal = item.price * totalQty;
-            const customDesigns = item.selectedStyles?.filter(s => s.isCustomDesign) || [];
-            return (
-              <tr key={index}>
-                <td style={{ padding: '12px', border: '1px solid #ececec' }}>
-                  {item.name}
-                  {hasStyles && (
-                    <div style={{ marginTop: '8px', fontSize: '11px', color: '#666' }}>
-                      <strong>Styles:</strong>
-                      {item.selectedStyles.map((s, i) => (
-                        <div key={i} style={{ marginLeft: '10px', marginTop: '2px' }}>
-                          • {s.name} (Qty: {s.quantity}) = ₹{s.total}
-                        </div>
-                      ))}
-                      {customDesigns.length > 0 && (
-                        <div style={{ marginTop: '4px' }}>
-                          <strong>Custom Design:</strong>
-                          {customDesigns.map((d, di) => (
-                            <div key={di} style={{ marginLeft: '10px', marginTop: '2px', fontSize: '10px' }}>
-                              • Text: {d.customText || '—'} {d.customDescription ? `| Details: ${d.customDescription}` : ''}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </td>
-                <td style={{ padding: '12px', textAlign: 'center', border: '1px solid #ececec' }}>{totalQty}</td>
-                <td style={{ padding: '12px', textAlign: 'right', border: '1px solid #ececec' }}>₹{item.price}</td>
-                <td style={{ padding: '12px', textAlign: 'right', border: '1px solid #ececec' }}>₹{itemTotal.toFixed(2)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-
-      {/* Totals */}
-      <div style={{ marginBottom: '30px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-          <span>Subtotal:</span>
-          <span>₹{orderPricing.subtotal.toFixed(2)}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-          <span>Discount:</span>
-          <span>-₹{orderPricing.discountAmount.toFixed(2)}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-          <span>Shipping:</span>
-          <span>{orderPricing.shipping === 0 ? 'Free' : `₹${orderPricing.shipping.toFixed(2)}`}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-          <span>{companySettings.taxLabel} ({orderPricing.gstRate}%):</span>
-          <span>₹{orderPricing.gstAmount.toFixed(2)}</span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '20px', paddingTop: '20px', borderTop: '2px solid #16A34A', fontWeight: 'bold', fontSize: '18px' }}>
-          <span>Grand Total:</span>
-          <span>₹{orderPricing.grandTotal.toFixed(2)}</span>
-        </div>
-        {order.paidAmount > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', color: '#16A34A' }}>
-            <span>Paid Amount:</span>
-            <span>₹{order.paidAmount.toFixed(2)}</span>
-          </div>
-        )}
-        {order.pendingAmount > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '5px', color: '#D97706' }}>
-            <span>Pending on Delivery:</span>
-            <span>₹{order.pendingAmount.toFixed(2)}</span>
-          </div>
-        )}
-      </div>
-
-      {/* Footer */}
-      <div style={{ borderTop: '1px solid #eee', paddingTop: '30px', marginTop: '30px', textAlign: 'center', color: '#666', fontSize: '14px' }}>
-        <p style={{ margin: '10px 0' }}>Need help? Contact us at <strong>{companySettings.email}</strong></p>
-        <p style={{ margin: '10px 0' }}>GSTIN: {companySettings.gstin}</p>
-        <p style={{ margin: '20px 0' }}>© 2026 {companySettings.companyName} - Sustainable Packaging • Quality • Trust</p>
-      </div>
-    </div>
-  );
+  const printInvoice = () => {
+    printInvoiceHtml({ html: invoiceHtml, title: invoiceFileName.replace(/\.pdf$/, '') });
+  };
 
   const handleConfirmCancel = () => {
     if (lockedForCancel) {
@@ -279,7 +159,7 @@ const OrderInfoView = () => {
         const product = products.find(p => String(p.id) === String(item.id));
         if (product && product.stock !== undefined) {
           const restored = (product.stock || 0) + (item.quantity || 1);
-          updateProductStock(item.id, restored, `Stock restored from cancelled order ${order.id}`).catch(() => {});
+          updateProductStock(item.id, restored, `Stock restored from cancelled order ${order.id}`, { orderId: order.id, quantity: item.quantity || 1, action: 'cancel' }).catch(() => {});
         }
       });
     }
@@ -578,16 +458,22 @@ const OrderInfoView = () => {
                   <X className="w-6 h-6" />
                 </button>
               </div>
-              <div className="overflow-auto max-h-[70vh] border border-gray-200 rounded-2xl p-4">
-                <InvoiceHTML />
+              <div className="overflow-auto max-h-[70vh] border border-gray-200 rounded-2xl p-4 bg-gray-50">
+                {/* Same template the counter bill uses, so the preview, the PDF
+                    and the printout are one and the same document. */}
+                <div dangerouslySetInnerHTML={{ __html: invoiceHtml }} />
               </div>
-              <div className="flex gap-3 mt-6 justify-end">
+              <div className="flex flex-wrap gap-3 mt-6 justify-end">
                 <button onClick={() => setShowInvoiceModal(false)} className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-colors">
                   Close
                 </button>
-                <button onClick={downloadInvoicePdf} className="px-6 py-3 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700 transition-colors flex items-center gap-2">
+                <button onClick={printInvoice} className="px-6 py-3 bg-white border-2 border-emerald-600 text-emerald-700 rounded-xl font-semibold hover:bg-emerald-50 transition-colors flex items-center gap-2">
+                  <Printer className="w-5 h-5" />
+                  Print
+                </button>
+                <button onClick={downloadInvoicePdf} disabled={invoiceBusy} className="px-6 py-3 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700 transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
                   <Download className="w-5 h-5" />
-                  Download PDF
+                  {invoiceBusy ? 'Preparing PDF…' : 'Download PDF'}
                 </button>
               </div>
             </div>

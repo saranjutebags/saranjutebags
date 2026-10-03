@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import { Link } from 'react-router-dom';
 import { Edit3, Home, MapPin, Plus, Trash2, CheckCircle2, ShoppingBag } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCart } from '../contexts/CartContext';
@@ -89,12 +90,15 @@ const ProfileView = () => {
           </button>
         </div>
 
-        <div className="flex gap-3 mb-8 overflow-x-auto pb-2">
+        {/* Equal thirds on phones instead of a scrollable row: nothing can be
+            pushed off-screen or clipped at the edge, and no drag is needed. */}
+        <div className="grid grid-cols-3 gap-2 sm:flex sm:gap-3 mb-6">
           {['profile', 'addresses', 'orders'].map((item) => (
             <button
               key={item}
+              type="button"
               onClick={() => setTab(item)}
-              className={`px-5 py-3 rounded-xl font-semibold whitespace-nowrap border transition-colors ${tab === item ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-emerald-50'}`}
+              className={`w-full sm:w-auto px-2 py-2.5 sm:px-5 sm:py-3 rounded-xl font-semibold text-[11px] sm:text-base whitespace-nowrap overflow-hidden text-ellipsis border transition-colors ${tab === item ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-emerald-50'}`}
             >
               {item === 'profile' ? 'Edit Profile' : item === 'addresses' ? 'Saved Addresses' : 'Order History'}
             </button>
@@ -203,26 +207,32 @@ const ProfileView = () => {
 
         {tab === 'orders' && (
           <motion.div className="glass rounded-3xl p-8 border border-emerald-100" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
-            <div className="flex items-center gap-3 mb-6">
-              <ShoppingBag className="w-5 h-5 text-emerald-600" />
-              <h2 className="text-2xl font-bold text-gray-800">Order History</h2>
+            <div className="flex items-center justify-between gap-3 mb-6">
+              <div className="flex items-center gap-3">
+                <ShoppingBag className="w-5 h-5 text-emerald-600" />
+                <h2 className="text-2xl font-bold text-gray-800">Order History</h2>
+              </div>
+              {/* The full order list, tracking and invoices live on /orders. */}
+              <Link to="/orders" className="btn-secondary px-4 py-2 text-sm whitespace-nowrap">All Orders</Link>
             </div>
-            <div className="rounded-2xl bg-emerald-50 p-4 text-gray-700">
-              Orders are shown from checkout once you place them. Add one from checkout to see the history here.
-            </div>
-            <div className="mt-6 space-y-4">
+            <div className="mt-2 space-y-4">
               {defaultAddress && (
                 <div className="rounded-2xl border border-emerald-100 bg-white p-4">
-                  <p className="text-sm font-semibold text-gray-800 mb-1">Default address on file</p>
+                  <p className="text-sm font-semibold text-gray-800 mb-1">Default address</p>
                   <p className="text-sm text-gray-600">{defaultAddress.addressLine1}, {defaultAddress.city}, {defaultAddress.state} - {defaultAddress.pincode}</p>
                 </div>
               )}
-              {orders.length > 0 ? orders.map((order) => (
-                <div key={order.id} className="rounded-2xl border border-emerald-100 bg-white p-4">
+              {orders.length > 0 ? orders.slice(0, 5).map((order) => (
+                <Link
+                  key={order.id}
+                  // Each recent order deep-links to its own tracking page.
+                  to={`/orders/${order.id}`}
+                  className="block rounded-2xl border border-emerald-100 bg-white p-4 hover:border-emerald-300 hover:shadow-md transition-all"
+                >
                   <p className="font-semibold text-gray-800 mb-1">{order.id}</p>
-                  <p className="text-sm text-gray-600 mb-2">{order.items.length} item(s) • {order.status}</p>
-                  <p className="text-sm text-gray-500">{order.date}</p>
-                </div>
+                  <p className="text-sm text-gray-600 mb-2">{(order.items || []).length} item(s) • {order.status}</p>
+                  <p className="text-sm text-gray-500">{order.date || ''}</p>
+                </Link>
               )) : (
                 <div className="rounded-2xl border border-dashed border-gray-200 p-6 text-center text-gray-500">
                   Your completed orders will appear here after checkout.

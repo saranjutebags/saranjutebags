@@ -8,6 +8,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useProducts } from '../contexts/ProductContext';
 import { useCart } from '../contexts/CartContext';
 import HomeSlideshow from '../components/HomeSlideshow';
+import CategoryOrbit from '../components/CategoryOrbit';
 import SEOHead from '../components/SEOHead';
 import { slugify } from '../utils/slugify';
 
@@ -159,44 +160,13 @@ const LandingView = () => {
               <p className="text-sm mt-1">The admin is setting up the store. Check back shortly.</p>
             </div>
           ) : (
-            <div className={`grid gap-8 ${visibleCategories.length === 1 ? 'max-w-sm mx-auto' : visibleCategories.length === 2 ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}>
-              {visibleCategories.slice(0, 6).map((cat, index) => (
-                <motion.div
-                  key={cat.id}
-                  initial={{ opacity: 0, y: 30 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: index * 0.08 }}
-                  whileHover={{ y: -8 }}
-                  className="glass rounded-3xl overflow-hidden shadow-xl border border-emerald-100 cursor-pointer"
-                  onClick={() => navigate('/products')}
-                >
-                  <div className="h-56 bg-gradient-to-br from-emerald-50 to-mint-50 flex items-center justify-center p-6 overflow-hidden">
-                    {cat.image ? (
-                      <img src={cat.image} alt={cat.name} className="h-full w-full object-contain" />
-                    ) : (
-                      <div className="w-20 h-20 rounded-2xl bg-emerald-100 flex items-center justify-center">
-                        <Package className="w-10 h-10 text-emerald-500" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="p-6">
-                    <h3 className="text-2xl font-bold text-gray-800 mb-2">{cat.name}</h3>
-                    <p className="text-gray-600 mb-4 text-sm">
-                      {cat.description || `Explore premium sustainable ${cat.name.toLowerCase()} crafted for daily use and branding.`}
-                    </p>
-                    <span className="text-emerald-600 font-semibold flex items-center gap-1 text-sm">
-                      Shop Now <ChevronRight className="w-4 h-4" />
-                    </span>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
+            // Circles riding an orbit line instead of a flat row of cards.
+            <CategoryOrbit categories={visibleCategories.slice(0, 6)} />
           )}
 
           {visibleCategories.length > 0 && (
-            <div className="text-center mt-10">
-              <Link to="/categories" className="btn-secondary px-8 py-3 inline-flex items-center gap-2">
+            <div className="text-center mt-8">
+              <Link to="/categories" className="btn-secondary btn-auto px-7 py-2.5 text-sm font-semibold tracking-wide inline-flex items-center gap-2">
                 View All Categories <ArrowRight className="w-4 h-4" />
               </Link>
             </div>
@@ -362,7 +332,7 @@ const LandingView = () => {
               </Link>
             </motion.div>
             <motion.div initial={{ opacity: 0, scale: 0.9 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }} className="grid grid-cols-2 gap-5">
-              {[{ number: '14+', label: 'Years Experience' }, { number: '1000+', label: 'Products' }, { number: '5000+', label: 'Happy Clients' }, { number: '3', label: 'Branches' }].map((stat, i) => (
+              {[{ number: '14+', label: 'Years Experience' }, { number: '1000+', label: 'Products' }, { number: '5000+', label: 'Happy Clients' }, { number: '2', label: 'Branches' }].map((stat, i) => (
                 <div key={i} className="glass rounded-2xl p-6 text-center border border-emerald-100">
                   <div className="text-4xl font-bold text-gradient mb-1">{stat.number}</div>
                   <div className="text-gray-600 font-medium text-sm">{stat.label}</div>

@@ -6,7 +6,7 @@ const stats = [
   { number: '14+', label: 'Years Experience' },
   { number: '1000+', label: 'Products' },
   { number: '5000+', label: 'Happy Clients' },
-  { number: '3', label: 'Branches' },
+  { number: '2', label: 'Branches' },
 ];
 
 const AboutView = () => {

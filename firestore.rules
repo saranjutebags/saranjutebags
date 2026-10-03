@@ -1,0 +1,296 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Identity helpers ────────────────────────────────────────────────────
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Admin = custom claim (set via Admin SDK) OR the owner email used by the
+    // client-side isEmailAdmin check in src/contexts/AuthContext.jsx.
+    function isAdmin() {
+      return signedIn() && (
+        request.auth.token.admin == true
+        || (request.auth.token.email != null
+            && request.auth.token.email.lower() == 'saranjutebags@gmail.com'));
+    }
+
+    // Stock is business data: only the admin client may write it directly.
+    // Customer order flows go through the trusted serverless function
+    // /api/update-stock (Firebase Admin SDK), which derives the quantity from
+    // the order document itself, so no browser ever supplies a stock number.
+    // The shape of a customer cancellation. Callers add the ownership check,
+    // because the two order copies prove ownership differently.
+    function cancelFieldsAreValid() {
+      // Only cancellation fields may change — totals, items, payment and
+      // address data stay immutable for the customer. The app's cancel path
+      // patches exactly these fields, so nothing else is ever reported.
+      return request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'cancelReason', 'cancelledAt', 'orderTimeline'])
+        // Timeline: a real list, capped in size, growing by at most one entry
+        // per write — no arbitrary timeline injection.
+        && (!('orderTimeline' in request.resource.data)
+            || (request.resource.data.orderTimeline is list
+                && request.resource.data.orderTimeline.size() <= 50
+                && (!('orderTimeline' in resource.data)
+                    || !(resource.data.orderTimeline is list)
+                    || request.resource.data.orderTimeline.size()
+                       <= resource.data.orderTimeline.size() + 1)))
+        && (request.resource.data.status == resource.data.status
+            // No status change: reason/timestamp may be refreshed, but only
+            // as plain short strings.
+            ? ((!('cancelReason' in request.resource.data)
+                || (request.resource.data.cancelReason is string
+                    && request.resource.data.cancelReason.size() <= 300))
+               && (!('cancelledAt' in request.resource.data)
+                   || request.resource.data.cancelledAt is string))
+            // Cancellation: valid transition, a real reason, a timestamp, and
+            // the appended timeline entry must be the cancellation itself.
+            : (request.resource.data.status == 'Cancelled'
+               // Mirrors canCancelOrder() in src/views/OrderInfoView.jsx:
+               // cancellable before packing, nothing else.
+               && resource.data.status in ['Pending', 'Confirmed']
+               && request.resource.data.cancelReason is string
+               && request.resource.data.cancelReason.size() > 0
+               && request.resource.data.cancelReason.size() <= 300
+               && request.resource.data.cancelledAt is string
+               && request.resource.data.orderTimeline is list
+               && request.resource.data.orderTimeline.size() > 0
+               && request.resource.data.orderTimeline[
+                    request.resource.data.orderTimeline.size() - 1].status
+                  == 'Cancelled'));
+    }
+
+    // ─── Storefront catalog: readable by every visitor, writable by admin ───
+    match /products/{productId} {
+      allow read: if true;
+      allow create, delete: if isAdmin();
+      // Signed-in customers may keep the rating aggregates in sync after
+      // submitting a review (numbers only, never the review content itself).
+      // Everything else — price, name, images, stock — is admin/server only.
+      allow update: if isAdmin()
+        || (signedIn()
+            && request.resource.data.diff(resource.data)
+                 .affectedKeys().hasOnly(['rating', 'reviews'])
+            && request.resource.data.rating is number
+            && request.resource.data.rating >= 0 && request.resource.data.rating <= 5
+            && request.resource.data.reviews is int
+            && request.resource.data.reviews >= 0);
+
+      match /images/{chunkId} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
+      match /chunks/{chunkId} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
+    }
+
+    // Customer reviews: one document per review so no user can modify or wipe
+    // another customer's review, and no product fields are touched.
+    match /productReviews/{reviewId} {
+      allow read: if true;
+      allow create: if signedIn()
+        && request.resource.data.id == reviewId
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.productId is string
+        && request.resource.data.rating is int
+        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 3000
+        && (!('name' in request.resource.data)
+            || (request.resource.data.name is string
+                && request.resource.data.name.size() <= 80))
+        && (!('images' in request.resource.data)
+            || (request.resource.data.images is list
+                && request.resource.data.images.size() <= 3));
+      allow update, delete: if isAdmin();
+    }
+
+    match /categories/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+      match /chunks/{chunkId} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
+      match /images/{chunkId} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
+    }
+
+    match /settings/{docId} {
+      allow read: if true;
+      // Catalog versioning is a cache-invalidation signal for every open
+      // storefront — only the admin may bump it.
+      allow write: if isAdmin();
+      match /chunks/{chunkId} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
+      match /images/{chunkId} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
+    }
+
+    match /coupons/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+      match /chunks/{chunkId} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
+    }
+
+    match /popups/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+      match /chunks/{chunkId} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
+    }
+
+    match /banners/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+      match /chunks/{chunkId} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
+    }
+
+    match /reviews/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /notifications/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /scrollingTexts/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── Admin-only data ────────────────────────────────────────────────────
+    match /activityLogs/{logId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /offlineBills/{billId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /inventoryHistory/{logId} {
+      // Inventory ledger: written by the admin dashboard and by the trusted
+      // stock function only. Customers cannot inject stock records.
+      allow read, write: if isAdmin();
+    }
+
+    // ─── Orders: top-level mirror used by the admin dashboard ───────────────
+    match /orders/{orderId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isAdmin() || (signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.id == orderId
+        && request.resource.data.status == 'Pending');
+      // Customers may only cancel their own order, and only through the
+      // validated cancellation fields. Mirrors must carry their owner id.
+      allow update: if isAdmin() || (signedIn()
+        && 'userId' in resource.data
+        && resource.data.userId == request.auth.uid
+        && (!('userId' in request.resource.data)
+            || request.resource.data.userId == resource.data.userId)
+        && cancelFieldsAreValid());
+      // Order documents are financial records — only the admin may delete the
+      // mirror copy. Customers can only remove their own private copy.
+      allow delete: if isAdmin();
+
+      match /chunks/{chunkId} {
+        allow read: if isAdmin() || (signedIn()
+          && get(/databases/$(database)/documents/orders/$(orderId)).data.userId == request.auth.uid);
+        // Chunk docs are written BEFORE the parent order doc on first save, so
+        // the customer's own order copy is used as proof of ownership when the
+        // mirror does not exist yet.
+        allow create, update, delete: if isAdmin() || (signedIn()
+          && (exists(/databases/$(database)/documents/orders/$(orderId))
+              ? get(/databases/$(database)/documents/orders/$(orderId)).data.userId == request.auth.uid
+              : exists(/databases/$(database)/documents/users/$(request.auth.uid)/orders/$(orderId))));
+      }
+      match /images/{chunkId} {
+        allow read: if isAdmin() || (signedIn()
+          && get(/databases/$(database)/documents/orders/$(orderId)).data.userId == request.auth.uid);
+        allow write: if isAdmin();
+      }
+    }
+
+    // ─── User profiles & private subcollections ─────────────────────────────
+    match /users/{userId} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+      // Users may not grant themselves the admin role.
+      allow create: if signedIn() && request.auth.uid == userId
+        && (isAdmin() || (!('role' in request.resource.data)
+            || request.resource.data.role == 'customer'))
+        && (!('uid' in request.resource.data)
+            || request.resource.data.uid == request.auth.uid);
+      // Customer-editable profile fields: name and phone only. Anything that
+      // could be business-trustworthy (role, uid, wallet, points, orderCount,
+      // totalSpent, accountStatus, …) is rejected for non-admins.
+      allow update: if isAdmin() || (signedIn() && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['displayName', 'phone'])
+        && (!('displayName' in request.resource.data)
+            || request.resource.data.displayName is string)
+        && (!('phone' in request.resource.data)
+            || request.resource.data.phone is string));
+      allow delete: if isAdmin();
+
+      match /addresses/{addressId} {
+        // Owner-only contact data (name/phone/city/pincode/isDefault) with no
+        // system-controlled fields, so the owner keeps full control here.
+        allow read, write: if isAdmin() || (signedIn() && request.auth.uid == userId);
+      }
+
+      match /cart/{cartId} {
+        // The customer's saved cart, so it survives a sign-out, a new phone or
+        // a reinstall. Nobody else — not even another signed-in user — may read
+        // or write it.
+        allow read, write: if isAdmin() || (signedIn() && request.auth.uid == userId);
+        allow create, delete: if signedIn() && request.auth.uid == userId;
+      }
+
+      match /orders/{orderId} {
+        allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+        allow create: if isAdmin() || (signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.id == orderId
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.status == 'Pending');
+        // Ownership here comes from the document path, so this copy may be
+        // cancelled even if an older order document omits the userId field.
+        allow update: if isAdmin() || (signedIn() && request.auth.uid == userId
+          && (!('userId' in resource.data)
+              || resource.data.userId == request.auth.uid)
+          && cancelFieldsAreValid());
+        // Customers may delete only their own private copy; the admin mirror
+        // keeps the financial record.
+        allow delete: if isAdmin() || (signedIn() && request.auth.uid == userId);
+
+        match /chunks/{chunkId} {
+          allow read, write: if isAdmin() || (signedIn() && request.auth.uid == userId);
+        }
+        match /images/{chunkId} {
+          allow read, write: if isAdmin() || (signedIn() && request.auth.uid == userId);
+        }
+      }
+    }
+  }
+}

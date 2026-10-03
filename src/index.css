@@ -14,6 +14,13 @@
   box-sizing: border-box;
 }
 
+/* Guard against stray horizontal scroll on phones (wide absolutely-positioned
+   bits, vw-based tricks, etc). Set on html so it propagates to the viewport
+   and keeps position: sticky working inside the page. */
+html {
+  overflow-x: hidden;
+}
+
 body {
   font-family: 'Poppins', 'Inter', 'DM Sans', sans-serif;
   background: linear-gradient(135deg, var(--brand-surface) 0%, #ffffff 50%, var(--brand-secondary) 100%);
@@ -176,6 +183,12 @@ body {
   }
 }
 
+/* Opt out of the mobile full-width rule for CTAs that should stay compact
+   and content-sized (centred pills under the category orbit, for example). */
+.btn-auto {
+  width: auto !important;
+}
+
 /* Scrolling announcement marquee */
 @keyframes marquee {
   0% { transform: translateX(0); }
@@ -196,5 +209,57 @@ body {
 .break-words {
   word-break: break-word;
   overflow-wrap: break-word;
+}
+
+/* ─── App chrome: header and the mobile tab bar ───────────────────────────── */
+/* Deliberately not .glass — the mobile rule above pads every .glass block,
+   which made the header band taller than it needed to be. */
+.site-header {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, var(--brand-surface) 100%);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-bottom: 1px solid rgba(27, 77, 62, 0.12);
+}
+
+.site-bottom-nav {
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-top: 1px solid rgba(27, 77, 62, 0.12);
+  box-shadow: 0 -4px 20px rgba(27, 77, 62, 0.10);
+}
+
+/* Home page category orbit: the dashed marker travels along the ellipse. The
+   dash pattern repeats every 18 units, so -360 loops without a visible jump. */
+.orbit-trail ellipse:last-of-type {
+  animation: orbit-dash 9s linear infinite;
+}
+
+@keyframes orbit-dash {
+  to {
+    stroke-dashoffset: -360;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbit-trail ellipse:last-of-type {
+    animation: none;
+  }
+}
+
+/* Phones and small tablets (below the md breakpoint, where the tab bar shows):
+   both bars publish their real measured height, so page content always starts
+   below the header and ends above the tabs — no guessed padding that leaves a
+   blank band or hides a page heading behind the fixed header. */
+@media (max-width: 767px) {
+  .min-h-screen[class*="pt-32"] {
+    padding-top: calc(var(--site-header-h, 80px) + 1rem);
+    padding-bottom: calc(var(--site-bottom-nav-h, 68px) + 1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Keep the floating help stack clear of the tab bar. */
+  .help-float-stack {
+    bottom: calc(var(--site-bottom-nav-h, 68px) + 1.5rem + env(safe-area-inset-bottom, 0px));
+  }
 }
 

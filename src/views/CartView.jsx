@@ -70,7 +70,7 @@ const CartView = () => {
                           <p className="text-gray-600 text-sm mb-4">{item.category}</p>
                         </div>
                         <button
-                          onClick={() => removeFromCart(item.id)}
+                          onClick={() => removeFromCart(item.id, item.stylesKey || '')}
                           className="p-2 text-gray-400 hover:text-red-500 transition-colors"
                         >
                           <Trash2 className="w-5 h-5" />
@@ -142,14 +142,14 @@ const CartView = () => {
                           </span>
                           <div className="flex items-center border border-gray-200 rounded-lg">
                             <button
-                              onClick={() => updateQuantity(item.id, Math.max(1, totalQty - 1))}
+                              onClick={() => updateQuantity(item.id, Math.max(1, totalQty - 1), item.stylesKey || '')}
                               className="px-3 py-2 hover:bg-emerald-50 transition-colors"
                             >
                               -
                             </button>
                             <span className="px-4 py-2 font-semibold">{totalQty}</span>
                             <button
-                              onClick={() => updateQuantity(item.id, totalQty + 1)}
+                              onClick={() => updateQuantity(item.id, totalQty + 1, item.stylesKey || '')}
                               className="px-3 py-2 hover:bg-emerald-50 transition-colors"
                             >
                               +

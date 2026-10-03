@@ -11,11 +11,11 @@ import { getAuth, updatePassword } from 'firebase/auth';
 import { convertFileToBase64, validateImageFile, compressImage, compressMultipleImagesFast, compressImageFast, recompressDataUrl } from '../utils/imageUtils';
 import { getItemImage } from '../utils/orderImageUtils';
 import { hydrateDoc } from '../utils/chunkedFirestore';
-import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+import { buildInvoiceHTML, orderToInvoice, exportInvoicePdf, printInvoiceHtml } from '../utils/invoiceDocument';
 import { isDelhiveryActive, fetchWaybill, createShipment, requestPickup, calculateShippingCharge, registerWarehouse } from '../services/delhivery';
 import {
   LayoutDashboard,
+  Menu,
   Package,
   ShoppingCart,
   Users,
@@ -58,13 +58,14 @@ import OfflineBillsSheet from '../components/OfflineBillsSheet';
 
 const AdminDashboard = () => {
   const { user, signOut } = useAuth();
-  const { products, categories, addProduct, updateProduct, deleteProduct, addCategory, updateCategory, deleteCategory, toggleCategoryVisibility, deleteProductReview, toggleReviewVisibility, updateProductStock, fetchSingleProduct, optimizeAllProducts } = useProducts();
+  const { products, categories, addProduct, updateProduct, deleteProduct, addCategory, updateCategory, deleteCategory, toggleCategoryVisibility, deleteProductReview, toggleReviewVisibility, updateProductStock, fetchSingleProduct, optimizeAllProducts, fetchAllProductReviews } = useProducts();
   const { orders, updateOrder, deleteOrders } = useCart();
   const { pricingSettings, updatePricingSettings, warehouse, domesticShipping, internationalRates, updateWarehouse, updateDomesticShipping, updateInternationalShipping } = useCart();
   const { companySettings, updateCompanySettings, banners, addBanner, updateBanner, deleteBanner, scrollingTexts, addScrollingText, updateScrollingText, deleteScrollingText, activityLogs, addActivityLog, testProductSettings, updateTestProductSettings, subscribeAdminRealtime } = useAdmin();
   const navigate = useNavigate();
   
   const [activeTab, setActiveTab] = useState('overview');
+  const [navOpen, setNavOpen] = useState(false);
   const [activeOrderFilter, setActiveOrderFilter] = useState('all');
   const [activeDateFilter, setActiveDateFilter] = useState('this-month');
   const [activeCategoryFilter, setActiveCategoryFilter] = useState('all');
@@ -249,6 +250,33 @@ const [productImages, setProductImages] = useState([]);
     { id: 'theme', label: 'Theme', icon: Palette },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
+
+  // One tab list, two homes for it: the sticky desktop sidebar and the slide-in
+  // drawer phones use, so an admin never scrolls past thirteen features to reach
+  // the section they want.
+  const renderNavTabs = (onSelect) => (
+    <>
+      {tabs.map(tab => (
+        <button
+          key={tab.id}
+          onClick={() => { setActiveTab(tab.id); onSelect?.(); }}
+          className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-left ${
+            activeTab === tab.id ? 'bg-emerald-600 text-white shadow-md' : 'text-gray-700 hover:bg-gray-100'
+          }`}
+        >
+          <tab.icon className="w-5 h-5 shrink-0" />
+          <span className="font-medium">{tab.label}</span>
+        </button>
+      ))}
+      <button
+        onClick={() => { navigate('/products'); onSelect?.(); }}
+        className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-700 hover:bg-gray-100 text-left"
+      >
+        <Home className="w-5 h-5 shrink-0" />
+        <span className="font-medium">View Store</span>
+      </button>
+    </>
+  );
 
   const showMessage = (msg, type = 'success') => {
     setMessage(msg);
@@ -883,111 +911,33 @@ const [productImages, setProductImages] = useState([]);
     }
   };
 
+  const buildOrderInvoiceHtml = (order) => buildInvoiceHTML(
+    orderToInvoice(order, {
+      invoicePrefix: companySettings.invoicePrefix || 'INV',
+      gstRate: Number(pricingSettings?.gstRate) || 18,
+    }),
+    companySettings,
+  );
+
+  // The admin's invoice is the shared template, so it matches what the customer
+  // sees and what the counter prints, and it paginates properly.
   const downloadAdminInvoicePdf = async (order) => {
-    // Create a temporary div to render the invoice
-    const tempDiv = document.createElement('div');
-    tempDiv.id = 'admin-invoice-content';
-    document.body.appendChild(tempDiv);
-    
-    // Render invoice HTML into tempDiv
-    const orderPricing = order.pricing || {
-      subtotal: order.subtotal ?? order.total,
-      discountAmount: order.discountAmount ?? 0,
-      shipping: order.shippingCharge ?? 0,
-      gstRate: order.gstRate ?? 0,
-      gstAmount: order.gstAmount ?? 0,
-      grandTotal: order.grandTotal ?? order.total,
-    };
-    
-    tempDiv.innerHTML = `
-      <div class="bg-white p-8 max-w-2xl mx-auto" style="font-family: 'Arial', sans-serif;">
-        <div style="background: linear-gradient(135deg, #0F766E, #16A34A); padding: 35px; border-radius: 14px; margin-bottom: 30px;">
-          <h1 style="margin: 0; color: #fff; font-size: 30px;">${companySettings.companyName}</h1>
-          <p style="margin-top: 8px; color: #E8FFF4; font-size: 15px;">Premium Eco-Friendly Packaging Solutions</p>
-        </div>
-        <div style="margin-bottom: 30px;">
-          <p><strong>Invoice No:</strong> ${companySettings.invoicePrefix || 'INV'}-${order.id.slice(-6)}</p>
-          <p><strong>Invoice Date:</strong> ${order.date}</p>
-          <p><strong>Order ID:</strong> ${order.id}</p>
-          <p><strong>Payment Method:</strong> ${order.paymentMethod}</p>
-        </div>
-        <div style="margin-bottom: 30px; padding: 20px; background-color: #f8fafc; border-radius: 8px;">
-          <h3 style="margin: 0 0 10px 0; color: #222;">Bill To:</h3>
-          <p style="margin: 5px 0;"><strong>${order.shippingAddress.name}</strong></p>
-          <p style="margin: 5px 0;">${order.shippingAddress.addressLine1}</p>
-          <p style="margin: 5px 0;">${order.shippingAddress.city}, ${order.shippingAddress.state} - ${order.shippingAddress.pincode}</p>
-          <p style="margin: 5px 0;">Phone: ${order.shippingAddress.phone}</p>
-        </div>
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
-          <thead>
-            <tr style="background-color: #f8fafc;">
-              <th style="padding: 12px; text-align: left; border: 1px solid #ececec;">Item</th>
-              <th style="padding: 12px; text-align: center; border: 1px solid #ececec;">Qty</th>
-              <th style="padding: 12px; text-align: right; border: 1px solid #ececec;">Price</th>
-              <th style="padding: 12px; text-align: right; border: 1px solid #ececec;">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${order.items.map(item => `
-              <tr>
-                <td style="padding: 12px; border: 1px solid #ececec;">${item.name}</td>
-                <td style="padding: 12px; text-align: center; border: 1px solid #ececec;">${item.quantity}</td>
-                <td style="padding: 12px; text-align: right; border: 1px solid #ececec;">₹${item.price}</td>
-                <td style="padding: 12px; text-align: right; border: 1px solid #ececec;">₹${(item.price * item.quantity).toFixed(2)}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-        <div style="margin-bottom: 30px;">
-          <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-            <span>Subtotal:</span>
-            <span>₹${orderPricing.subtotal.toFixed(2)}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-            <span>Discount:</span>
-            <span>-₹${orderPricing.discountAmount.toFixed(2)}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-            <span>Shipping:</span>
-            <span>${orderPricing.shipping === 0 ? 'Free' : `₹${orderPricing.shipping.toFixed(2)}`}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-            <span>GST (${orderPricing.gstRate}%):</span>
-            <span>₹${orderPricing.gstAmount.toFixed(2)}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; margin-top: 20px; padding-top: 20px; border-top: 2px solid #16A34A; font-weight: bold; font-size: 18px;">
-            <span>Grand Total:</span>
-            <span>₹${orderPricing.grandTotal.toFixed(2)}</span>
-          </div>
-        </div>
-        <div style="border-top: 1px solid #eee; padding-top: 30px; margin-top: 30px; text-align: center; color: #666; font-size: 14px;">
-          <p style="margin: 10px 0;">Need help? Contact us at <strong>${companySettings.email}</strong></p>
-          <p style="margin: 10px 0;">GSTIN: ${companySettings.gstin}</p>
-          <p style="margin: 20px 0;">© 2026 ${companySettings.companyName} - Sustainable Packaging • Quality • Trust</p>
-        </div>
-      </div>
-    `;
-
     try {
-      const canvas = await html2canvas(tempDiv, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
+      await exportInvoicePdf({
+        html: buildOrderInvoiceHtml(order),
+        filename: `${companySettings.invoicePrefix || 'INV'}-${order.id}.pdf`,
       });
-
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgWidth = 210;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
-      pdf.save(`${companySettings.invoicePrefix || 'INV'}-${order.id}.pdf`);
     } catch (error) {
       console.error('Admin invoice download error:', error);
-    } finally {
-      document.body.removeChild(tempDiv);
+      showMessage('Failed to generate the invoice PDF', 'error');
     }
+  };
+
+  const printAdminInvoice = (order) => {
+    printInvoiceHtml({
+      html: buildOrderInvoiceHtml(order),
+      title: `${companySettings.invoicePrefix || 'INV'}-${order.id}`,
+    });
   };
 
   const handleSignOut = async () => {
@@ -2519,15 +2469,27 @@ const [productImages, setProductImages] = useState([]);
 
   const [reviewFilterProduct, setReviewFilterProduct] = useState('all');
   const [reviewFilterStatus, setReviewFilterStatus] = useState('all');
+  const [allProductReviews, setAllProductReviews] = useState([]);
+  const fetchAllReviewsRef = useRef(fetchAllProductReviews);
+  fetchAllReviewsRef.current = fetchAllProductReviews;
+
+  // Reviews live in the productReviews collection — load them fresh whenever
+  // the moderation tab is opened.
+  useEffect(() => {
+    if (activeTab !== 'reviews') return;
+    let active = true;
+    fetchAllReviewsRef.current().then(list => {
+      if (active) setAllProductReviews(list || []);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [activeTab]);
 
   const getAllProductReviews = () => {
-    const all = [];
-    products.forEach(product => {
-      (product.customerReviews || []).forEach(review => {
-        all.push({ ...review, productId: product.id, productName: product.name });
-      });
-    });
-    return all;
+    return allProductReviews.map(review => ({
+      ...review,
+      productName: review.productName
+        || (products.find(p => String(p.id) === String(review.productId))?.name || 'Unknown Product'),
+    }));
   };
 
   const getFilteredProductReviews = () => {
@@ -2540,7 +2502,7 @@ const [productImages, setProductImages] = useState([]);
     } else if (reviewFilterStatus === 'hidden') {
       all = all.filter(r => r.hidden);
     }
-    all.sort((a, b) => (b.id || 0) - (a.id || 0));
+    all.sort((a, b) => String(b.id || '').localeCompare(String(a.id || '')));
     return all;
   };
 
@@ -2627,7 +2589,12 @@ const [productImages, setProductImages] = useState([]);
                       <td className="p-3">
                         <div className="flex gap-1">
                           <button
-                            onClick={() => toggleReviewVisibility(review.productId, review.id)}
+                            onClick={() => {
+                              toggleReviewVisibility(review.id, !review.hidden);
+                              setAllProductReviews(prev => prev.map(r =>
+                                r.id === review.id ? { ...r, hidden: !review.hidden } : r
+                              ));
+                            }}
                             className="p-1.5 text-gray-600 hover:bg-gray-100 rounded"
                             title={review.hidden ? 'Show' : 'Hide'}
                           >
@@ -2636,7 +2603,8 @@ const [productImages, setProductImages] = useState([]);
                           <button
                             onClick={() => {
                               if (confirm('Delete this review?')) {
-                                deleteProductReview(review.productId, review.id);
+                                deleteProductReview(review.id);
+                                setAllProductReviews(prev => prev.filter(r => r.id !== review.id));
                               }
                             }}
                             className="p-1.5 text-red-600 hover:bg-red-50 rounded"
@@ -3839,6 +3807,13 @@ const [productImages, setProductImages] = useState([]);
                   <Download className="w-5 h-5" />
                   Download Invoice
                 </button>
+                <button
+                  onClick={() => printAdminInvoice(selectedOrder)}
+                  className="px-6 py-3 bg-white border-2 border-emerald-600 text-emerald-700 rounded-lg hover:bg-emerald-50 transition-all flex items-center gap-2"
+                >
+                  <Printer className="w-5 h-5" />
+                  Print Invoice
+                </button>
                 <select
                   value={selectedOrder.status}
                   onChange={(e) => {
@@ -4285,7 +4260,22 @@ const [productImages, setProductImages] = useState([]);
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <h1 className="text-xl md:text-2xl font-bold text-gray-800">Admin Dashboard</h1>
+          <div className="flex items-center gap-2 min-w-0">
+            {/* Phones and tablets reach the feature list from the header icon. */}
+            <button
+              onClick={() => setNavOpen(true)}
+              className="lg:hidden p-2 rounded-lg hover:bg-gray-100 text-gray-700 shrink-0"
+              aria-label="Open admin navigation"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+            <div className="min-w-0">
+              <h1 className="text-lg md:text-2xl font-bold text-gray-800 truncate">Admin Dashboard</h1>
+              <p className="text-xs font-medium text-emerald-700 lg:hidden">
+                {tabs.find(tab => tab.id === activeTab)?.label || 'Overview'}
+              </p>
+            </div>
+          </div>
           <div className="flex items-center gap-3">
             <button
               onClick={() => setShowExportModal(true)}
@@ -4314,30 +4304,44 @@ const [productImages, setProductImages] = useState([]);
       </header>
 
       <div className="max-w-7xl mx-auto px-4 py-6 flex flex-col lg:flex-row gap-6">
-        {/* Sidebar */}
-        <aside className="lg:w-64 flex-shrink-0">
-          <nav className="bg-white rounded-xl shadow-sm p-4 space-y-2 overflow-x-auto">
-            {tabs.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                  activeTab === tab.id ? 'bg-emerald-600 text-white' : 'text-gray-700 hover:bg-gray-100'
-                }`}
-              >
-                <tab.icon className="w-5 h-5" />
-                <span>{tab.label}</span>
-              </button>
-            ))}
-            <button
-              onClick={() => navigate('/products')}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-700 hover:bg-gray-100"
-            >
-              <Home className="w-5 h-5" />
-              <span>View Store</span>
-            </button>
+        {/* Sidebar: sticky on desktop, and on phones the same list lives in the
+            drawer above so the page content is immediately below the header. */}
+        <aside className="hidden lg:block lg:w-64 flex-shrink-0">
+          <nav className="bg-white rounded-xl shadow-sm p-4 space-y-2 lg:sticky lg:top-[88px] lg:max-h-[calc(100vh-104px)] lg:overflow-y-auto">
+            {renderNavTabs()}
           </nav>
         </aside>
+
+        <AnimatePresence>
+          {navOpen && (
+            <div className="fixed inset-0 z-50 lg:hidden">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setNavOpen(false)}
+                className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              />
+              <motion.aside
+                initial={{ x: -320 }}
+                animate={{ x: 0 }}
+                exit={{ x: -320 }}
+                transition={{ type: 'tween', duration: 0.22, ease: 'easeOut' }}
+                className="absolute top-0 left-0 bottom-0 w-72 max-w-[84vw] bg-white shadow-2xl flex flex-col"
+              >
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                  <span className="font-bold text-gray-800">Admin Features</span>
+                  <button onClick={() => setNavOpen(false)} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Close navigation">
+                    <X className="w-5 h-5 text-gray-600" />
+                  </button>
+                </div>
+                <nav className="flex-1 overflow-y-auto p-4 space-y-2">
+                  {renderNavTabs(() => setNavOpen(false))}
+                </nav>
+              </motion.aside>
+            </div>
+          )}
+        </AnimatePresence>
 
         {/* Main Content */}
         <main className="flex-1 min-w-0 overflow-x-auto">
